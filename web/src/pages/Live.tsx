@@ -27,9 +27,9 @@ export default function LivePage() {
 
   return (
     <Stagger className="space-y-5">
-      <Item className="flex items-end justify-between">
+      <Item className="flex items-end justify-between max-sm:flex-wrap max-sm:gap-3">
         <div>
-          <div className="eyebrow flex items-center gap-2 text-team-text">
+          <div className="eyebrow flex items-center gap-2 whitespace-nowrap text-team-text">
             {liveCount > 0 ? (
               <>
                 <span className="live-dot" /> {liveCount} live now
@@ -41,7 +41,7 @@ export default function LivePage() {
           <h1 className="display text-4xl font-bold uppercase">{offset === 0 ? "Today" : label}</h1>
         </div>
         <div className="flex items-center gap-2">
-          <span className="mr-2 text-xs text-muted">
+          <span className="mr-2 text-xs text-muted max-sm:hidden">
             {dataUpdatedAt ? `Updated ${new Date(dataUpdatedAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", second: "2-digit" })}` : ""}
           </span>
           <Button variant="outline" size="sm" onClick={() => setOffset((o) => o - 1)}>
@@ -169,7 +169,7 @@ function TeamStats({ eventId }: { eventId: string }) {
   const { away, home } = data;
   return (
     <Panel className="p-4">
-      <table className="w-full text-[13px] tabular">
+      <table className="phone-scroll w-full text-[13px] tabular">
         <thead>
           <tr className="text-[11px] uppercase tracking-wider text-muted">
             <th className="pb-2 text-right font-medium">{away.abbr}</th>

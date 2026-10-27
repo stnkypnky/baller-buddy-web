@@ -18,6 +18,7 @@ import {
   WL,
 } from "../components/ui";
 import { countdown, tipLocal } from "../lib/format";
+import { useIsPhone } from "../lib/phone";
 import { seasonTypeLabel, useLeaders, useOverview, useSelection } from "../lib/queries";
 import { useApp } from "../lib/store";
 import type { Dashboard, SeasonType, Standing, Team, TeamGame } from "../lib/types";
@@ -80,13 +81,13 @@ export default function OverviewPage() {
               {seasonTypeLabel[seasonType]} averages
             </SectionTitle>
             {isLoading ? (
-              <div className="grid grid-cols-5 gap-3">
+              <div className="grid grid-cols-5 gap-3 max-sm:grid-cols-2">
                 {Array.from({ length: 10 }, (_, i) => (
                   <Skeleton key={i} className="h-[92px]" />
                 ))}
               </div>
             ) : dash && "pts" in dash ? (
-              <div className="grid grid-cols-5 gap-3">
+              <div className="grid grid-cols-5 gap-3 max-sm:grid-cols-2">
                 {KPIS.map((k, i) => (
                   <Kpi key={k.key} label={k.label} value={dash[k.key] as number} fmt={k.fmt} rank={ranks[k.key]} index={i} />
                 ))}
@@ -146,6 +147,7 @@ function Hero({
   season: string;
 }) {
   const hot = st?.streak.startsWith("W");
+  const phone = useIsPhone();
   return (
     <Panel className="relative overflow-hidden">
       <div className="pointer-events-none absolute inset-0 bg-gradient-to-r from-team/35 via-team/10 to-transparent" />
@@ -159,21 +161,21 @@ function Hero({
         <TeamLogo espnAbbr={team?.espn_abbr} size={380} />
       </motion.div>
 
-      <div className="relative flex items-center gap-7 p-7">
+      <div className="relative flex items-center gap-7 p-7 max-sm:flex-wrap max-sm:gap-4 max-sm:p-4">
         <motion.div
           key={`logo-${team?.id}`}
           initial={{ opacity: 0, y: 12, scale: 0.85 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
           transition={{ type: "spring", stiffness: 200, damping: 18 }}
-          className="grid size-32 shrink-0 place-items-center rounded-3xl border border-white/10 bg-black/30 shadow-[0_20px_60px_-20px_var(--team-glow)]"
+          className="grid size-32 shrink-0 place-items-center rounded-3xl border border-white/10 bg-black/30 shadow-[0_20px_60px_-20px_var(--team-glow)] max-sm:size-20 max-sm:rounded-2xl"
         >
-          <TeamLogo espnAbbr={team?.espn_abbr} size={104} glow />
+          <TeamLogo espnAbbr={team?.espn_abbr} size={phone ? 64 : 104} glow />
         </motion.div>
 
         <div className="min-w-0 flex-1">
           <div className="eyebrow text-team-text">{team?.city} · {season}</div>
-          <h1 className="display mt-1 truncate text-[64px] leading-[0.9] font-bold uppercase">{team?.nickname}</h1>
-          <div className="mt-4 flex flex-wrap gap-2">
+          <h1 className="display mt-1 truncate text-[64px] leading-[0.9] font-bold uppercase max-sm:text-[40px]">{team?.nickname}</h1>
+          <div className="mt-4 flex flex-wrap gap-2 max-sm:mt-3 max-sm:gap-1.5">
             {loading || !st ? (
               <Skeleton className="h-7 w-72" />
             ) : (
@@ -193,7 +195,7 @@ function Hero({
           </div>
         </div>
 
-        <div className="flex flex-col items-end gap-4">
+        <div className="flex flex-col items-end gap-4 max-sm:w-full max-sm:flex-col-reverse max-sm:items-stretch">
           <Segmented
             size="sm"
             value={seasonType}
@@ -204,8 +206,8 @@ function Hero({
               { value: "full", label: "Full Year" },
             ]}
           />
-          <div className="text-right">
-            <div className="display text-[84px] leading-none font-bold tabular">
+          <div className="text-right max-sm:flex max-sm:items-end max-sm:justify-between max-sm:gap-3 max-sm:text-left">
+            <div className="display text-[84px] leading-none font-bold tabular whitespace-nowrap max-sm:text-[56px]">
               {st ? (
                 <>
                   <AnimatedNumber value={st.wins} format={(v) => Math.round(v).toString()} />
@@ -354,7 +356,9 @@ function FormStrip({ games, loading }: { games: TeamGame[]; loading: boolean }) 
 function GamesTable({ games, onOpen }: { games: TeamGame[]; onOpen: (t: StoryTarget) => void }) {
   const sel = useSelection();
   return (
-    <table className="w-full text-[13px] tabular">
+    // Phones scroll the table sideways rather than drop columns.
+    <div className="max-sm:-mx-5 max-sm:overflow-x-auto max-sm:px-5">
+    <table className="w-full text-[13px] tabular max-sm:min-w-[600px] max-sm:whitespace-nowrap max-sm:[&_td]:pr-3 max-sm:[&_th]:pr-3">
       <thead>
         <tr className="text-[11px] uppercase tracking-wider text-muted">
           <th className="pb-2 text-left font-medium">Date</th>
@@ -402,5 +406,6 @@ function GamesTable({ games, onOpen }: { games: TeamGame[]; onOpen: (t: StoryTar
         })}
       </tbody>
     </table>
+    </div>
   );
 }

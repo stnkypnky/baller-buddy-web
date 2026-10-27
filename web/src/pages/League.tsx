@@ -67,7 +67,7 @@ function Standings() {
               <h3 className="display text-xl font-bold uppercase">{conf}ern Conference</h3>
               <span className="text-xs text-muted">Click a team to switch</span>
             </div>
-            <table className="w-full text-[13px] tabular">
+            <table className="phone-scroll w-full text-[13px] tabular">
               <thead>
                 <tr className="text-[11px] uppercase tracking-wider text-muted">
                   <th className="w-10 py-2.5 pl-5 text-left font-medium">#</th>

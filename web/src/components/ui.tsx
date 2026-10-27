@@ -25,7 +25,7 @@ export function Panel({
 
 export function SectionTitle({ children, right, className }: { children: ReactNode; right?: ReactNode; className?: string }) {
   return (
-    <div className={cx("mb-3 flex items-center justify-between gap-3", className)}>
+    <div className={cx("mb-3 flex items-center justify-between gap-3 max-sm:flex-wrap max-sm:gap-y-2", className)}>
       <h3 className="display text-[19px] font-bold uppercase tracking-wide text-fg">{children}</h3>
       {right}
     </div>
@@ -74,7 +74,7 @@ export function Segmented<T extends string>({
 }) {
   const id = useId();
   return (
-    <div className={cx("inline-flex rounded-xl border border-line bg-black/25 p-1", className)}>
+    <div className={cx("inline-flex rounded-xl border border-line bg-black/25 p-1 max-sm:max-w-full max-sm:overflow-x-auto max-sm:[scrollbar-width:none]", className)}>
       {options.map((o) => {
         const active = o.value === value;
         return (

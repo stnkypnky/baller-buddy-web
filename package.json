@@ -8,9 +8,10 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "wrangler pages dev dist --compatibility-date=2026-10-01",
-    "typecheck": "tsc --noEmit -p web && tsc --noEmit -p functions && tsc --noEmit -p worker-cron",
+    "typecheck": "tsc --noEmit -p web && tsc --noEmit -p web/tsconfig.sw.json && tsc --noEmit -p functions && tsc --noEmit -p worker-cron",
     "test": "vitest run",
-    "deploy:cron": "wrangler deploy -c worker-cron/wrangler.toml"
+    "deploy:cron": "wrangler deploy -c worker-cron/wrangler.toml",
+    "shots": "node scripts/shots.mjs shots"
   },
   "devDependencies": {
     "@anthropic-ai/sdk": "^1.3.0",

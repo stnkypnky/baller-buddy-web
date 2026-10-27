@@ -8,6 +8,7 @@ import { BoxScore } from "../components/BoxScore";
 import { Button, cx, Empty, ErrorState, Item, Panel, SectionTitle, Skeleton, Stagger, TeamLogo } from "../components/ui";
 import { api } from "../lib/api";
 import { timeLocal } from "../lib/format";
+import { useIsPhone } from "../lib/phone";
 import { useLive, useSelection } from "../lib/queries";
 import { contrast, hexToRgb, readableOnDark } from "../lib/theme";
 
@@ -171,9 +172,9 @@ function GamePulse({ eventId }: { eventId: string }) {
             className="pointer-events-none absolute inset-0 opacity-50"
             style={{ background: `linear-gradient(100deg, ${away.color}66, transparent 42%, transparent 58%, ${home.color}66)` }}
           />
-          <div className="relative grid grid-cols-[1fr_auto_1fr] items-center gap-6 px-8 py-6">
+          <div className="relative grid grid-cols-[1fr_auto_1fr] items-center gap-6 px-8 py-6 max-sm:grid-cols-2 max-sm:gap-x-3 max-sm:gap-y-4 max-sm:px-4 max-sm:py-5">
             <ScoreSide t={away} color={colors.away} espn={sel.byName.get(away.app_name)?.espn_abbr} lead={away.score > home.score} label="Away" />
-            <div className="flex flex-col items-center gap-2">
+            <div className="flex flex-col items-center gap-2 max-sm:order-last max-sm:col-span-2">
               <div className={cx("rounded-full px-3 py-1 text-xs font-bold", live ? "bg-loss/15 text-loss" : "bg-white/10 text-fg/80")}>
                 {live && <span className="live-dot mr-2 scale-75" />}
                 {data.status.detail}
@@ -365,9 +366,10 @@ function PulseBox({ eventId }: { eventId: string }) {
 }
 
 function ScoreSide({ t, color, espn, lead, label, right }: { t: PulseTeam; color: string; espn?: string; lead: boolean; label: string; right?: boolean }) {
+  const phone = useIsPhone();
   return (
-    <div className={cx("flex items-center gap-5", right && "flex-row-reverse text-right")}>
-      <TeamLogo espnAbbr={espn} size={84} />
+    <div className={cx("flex items-center gap-5 max-sm:flex-col max-sm:gap-1 max-sm:text-center", right && "flex-row-reverse text-right")}>
+      <TeamLogo espnAbbr={espn} size={phone ? 52 : 84} />
       <div>
         <div className="text-[11px] tracking-wider text-muted uppercase">
           {label} · {t.record}
@@ -378,7 +380,7 @@ function ScoreSide({ t, color, espn, lead, label, right }: { t: PulseTeam; color
         key={t.score}
         initial={{ y: -10, opacity: 0.4 }}
         animate={{ y: 0, opacity: 1 }}
-        className={cx("display text-7xl font-bold tabular", right ? "mr-auto" : "ml-auto")}
+        className={cx("display text-7xl font-bold tabular max-sm:mx-0 max-sm:text-5xl", right ? "mr-auto" : "ml-auto")}
         style={{ color: lead ? color : "#596174" }}
       >
         {t.score}

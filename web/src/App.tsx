@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "motion/react";
 import { Component, lazy, Suspense, useEffect, useState, type ReactNode } from "react";
 import { Route, Routes, useLocation, useNavigate } from "react-router-dom";
-import { BallMark, Sidebar, TitleBar, TopBar } from "./components/shell";
+import { BallMark, BottomNav, Sidebar, TitleBar, TopBar } from "./components/shell";
 import { Skeleton } from "./components/ui";
 import { api } from "./lib/api";
 import { useSelection } from "./lib/queries";
@@ -69,7 +69,7 @@ export default function App() {
                   animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
                   exit={{ opacity: 0, y: -8, filter: "blur(4px)", transition: { duration: 0.15 } }}
                   transition={{ duration: 0.32, ease: [0.22, 1, 0.36, 1] }}
-                  className="scroll absolute inset-0 px-6 pt-1 pb-8"
+                  className="scroll absolute inset-0 px-6 pt-1 pb-8 max-sm:px-3 max-sm:pb-6"
                 >
                   {booted && (
                     <PageErrorBoundary resetKey={location.pathname}>
@@ -102,6 +102,7 @@ export default function App() {
         <Suspense fallback={<div className="h-[72px] shrink-0 border-t border-line/60" />}>
           <MusicDock />
         </Suspense>
+        <BottomNav />
       </div>
       {booted && (
         <Suspense fallback={null}>

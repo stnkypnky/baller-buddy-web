@@ -72,7 +72,7 @@ export default function RosterPage() {
 
   return (
     <div className="space-y-5">
-      <div className="flex items-end justify-between">
+      <div className="flex items-end justify-between max-sm:flex-col max-sm:items-start max-sm:gap-3">
         <div className="flex items-center gap-4">
           <TeamLogo espnAbbr={sel.team?.espn_abbr} size={52} glow />
           <div>
@@ -81,7 +81,7 @@ export default function RosterPage() {
           </div>
           {data && <span className="mt-4 rounded-full bg-surface-2 px-2.5 py-0.5 text-xs text-muted">{data.length} players</span>}
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 max-sm:w-full max-sm:justify-between max-sm:gap-2">
           {rosterView === "cards" && (
             <Segmented
               size="sm"
@@ -104,7 +104,7 @@ export default function RosterPage() {
 
       {error && <ErrorState error={error} onRetry={() => refetch()} />}
       {isLoading && (
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-4">
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-4 max-sm:grid-cols-2 max-sm:gap-2.5">
           {Array.from({ length: 10 }, (_, i) => (
             <Skeleton key={i} className="h-[300px] rounded-[18px]" />
           ))}
@@ -113,7 +113,7 @@ export default function RosterPage() {
       {data && !data.length && <Empty title="No roster available" hint="nba.com didn't return this team's roster. Try again later, or pick another season." />}
 
       {data && !!data.length && rosterView === "cards" && (
-        <motion.div layout className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-4">
+        <motion.div layout className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-4 max-sm:grid-cols-2 max-sm:gap-2.5">
           {players.map((p, i) => (
             <PlayerCard key={p.pid} p={p} index={i} onOpen={() => open(p)} sortKey={sort.key} status={status(p, "backdrop-blur")} />
           ))}
@@ -122,7 +122,7 @@ export default function RosterPage() {
 
       {data && !!data.length && rosterView === "table" && (
         <Panel className="overflow-hidden">
-          <table className="w-full text-[13px] tabular">
+          <table className="phone-scroll w-full text-[13px] tabular">
             <thead>
               <tr className="border-b border-line text-[11px] uppercase tracking-wider text-muted">
                 <Th label="Player" k="name" sort={sort} setSort={setSort} left />
@@ -214,21 +214,21 @@ function PlayerCard({ p, index, onOpen, sortKey, status }: { p: Player; index: n
       <div className="relative aspect-[4/3] overflow-hidden bg-gradient-to-b from-team/35 via-team/10 to-transparent">
         <div className="absolute inset-0 opacity-30 [background:radial-gradient(circle_at_50%_120%,var(--team)_0%,transparent_60%)]" />
         <Headshot pid={p.pid} name={p.name} className="relative h-full w-full transition-transform duration-500 group-hover:scale-[1.06]" />
-        <div className="absolute top-3 left-3 rounded-md bg-black/50 px-2 py-0.5 text-[11px] font-bold text-fg/90 backdrop-blur">
+        <div className="absolute top-3 left-3 rounded-md bg-black/50 px-2 py-0.5 text-[11px] font-bold text-fg/90 backdrop-blur max-sm:top-2 max-sm:left-2 max-sm:px-1.5 max-sm:text-[10px]">
           {p.pos || "—"}
         </div>
-        <div className="absolute top-3 right-3 rounded-md bg-black/50 px-2 py-0.5 text-[11px] text-muted backdrop-blur tabular">
+        <div className="absolute top-3 right-3 rounded-md bg-black/50 px-2 py-0.5 text-[11px] text-muted backdrop-blur tabular max-sm:top-2 max-sm:right-2 max-sm:px-1.5 max-sm:text-[10px]">
           {p.mpg} MIN
         </div>
         <div className="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-[#0b0e14] to-transparent" />
         {(p.injury || p.absence) && <div className="absolute bottom-2 left-3 flex">{status}</div>}
       </div>
-      <div className="px-4 pt-1 pb-4">
-        <div className="display truncate text-[22px] font-bold uppercase leading-tight">{p.name}</div>
-        <div className="mt-3 grid grid-cols-3 gap-2">
+      <div className="px-4 pt-1 pb-4 max-sm:px-2.5 max-sm:pb-3">
+        <div className="display truncate text-[22px] font-bold uppercase leading-tight max-sm:text-[17px]">{p.name}</div>
+        <div className="mt-3 grid grid-cols-3 gap-2 max-sm:mt-2 max-sm:gap-1">
           {stats.map((s) => (
             <div key={s.k} className={cx("rounded-xl py-2 text-center", s.k === head ? "bg-team/20 ring-1 ring-team-text/30" : "bg-white/[0.04]")}>
-              <div className={cx("display text-xl font-bold tabular", s.k === head && "text-team-text")}>{s.v}</div>
+              <div className={cx("display text-xl font-bold tabular max-sm:text-base", s.k === head && "text-team-text")}>{s.v}</div>
               <div className={cx("text-[10px] font-semibold tracking-wider", s.k === head ? "text-team-text" : "text-muted")}>{s.label}</div>
             </div>
           ))}

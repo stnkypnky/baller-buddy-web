@@ -5,6 +5,7 @@ import { GameStoryDrawer, type StoryTarget } from "../components/GameStory";
 import { TeamSwitcher } from "../components/shell";
 import { cx, Empty, ErrorState, Item, Panel, SectionTitle, Segmented, Skeleton, Stagger, TeamLogo } from "../components/ui";
 import { readableOnDark } from "../lib/theme";
+import { useIsPhone } from "../lib/phone";
 import { useCompare, useSelection } from "../lib/queries";
 import { useApp } from "../lib/store";
 import type { Dashboard, Team } from "../lib/types";
@@ -58,18 +59,18 @@ export default function ComparePage() {
             className="pointer-events-none absolute inset-0 opacity-40"
             style={{ background: `linear-gradient(100deg, ${a?.colors.primary}55 0%, transparent 45%, transparent 55%, ${b?.colors.primary}55 100%)` }}
           />
-          <div className="relative grid grid-cols-[1fr_auto_1fr] items-center gap-6 px-8 py-7">
+          <div className="relative grid grid-cols-[1fr_auto_1fr] items-center gap-6 px-8 py-7 max-sm:grid-cols-1 max-sm:gap-3 max-sm:px-4 max-sm:py-5">
             <Side team={a} record={data?.a.record} color={ca} picker={<TeamSwitcher compact onChange={(t) => setTeam(t.id)} exclude={b?.id} />} />
-            <div className="flex flex-col items-center">
+            <div className="flex flex-col items-center max-sm:flex-row max-sm:justify-center max-sm:gap-3">
               <motion.div
                 initial={{ scale: 0.6, opacity: 0 }}
                 animate={{ scale: 1, opacity: 1 }}
-                className="display grid size-16 place-items-center rounded-full border border-white/15 bg-black/40 text-2xl font-bold"
+                className="display grid size-16 place-items-center rounded-full border border-white/15 bg-black/40 text-2xl font-bold max-sm:size-11 max-sm:text-lg"
               >
                 VS
               </motion.div>
               {data && (
-                <div className="mt-3 text-center text-xs text-muted">
+                <div className="mt-3 text-center text-xs text-muted max-sm:mt-0">
                   {data.series.length ? (
                     <>
                       Series{" "}
@@ -114,7 +115,7 @@ export default function ComparePage() {
                   const off = r.signed ? Math.max(0, -Math.min(lv, rv)) + 1 : 0;
                   const total = lv + rv + off * 2 || 1;
                   return (
-                    <div key={r.key} className="grid grid-cols-[64px_1fr_96px_1fr_64px] items-center gap-3">
+                    <div key={r.key} className="grid grid-cols-[64px_1fr_96px_1fr_64px] items-center gap-3 max-sm:grid-cols-[48px_1fr_64px_1fr_48px] max-sm:gap-1.5">
                       <span className={cx("text-right text-[15px] font-bold tabular", !lBetter && "text-muted")} style={lBetter ? { color: ca } : undefined}>
                         {fmt(lv)}
                       </span>
@@ -210,14 +211,15 @@ function Side({
   right?: boolean;
   picker: React.ReactNode;
 }) {
+  const phone = useIsPhone();
   return (
-    <div className={cx("flex items-center gap-5", right && "flex-row-reverse text-right")}>
+    <div className={cx("flex items-center gap-5 max-sm:gap-3", right && "flex-row-reverse text-right")}>
       <motion.div key={team?.id} initial={{ opacity: 0, x: right ? 30 : -30 }} animate={{ opacity: 1, x: 0 }} transition={{ type: "spring", stiffness: 160, damping: 18 }}>
-        <TeamLogo espnAbbr={team?.espn_abbr} size={110} className="drop-shadow-[0_14px_30px_rgba(0,0,0,.5)]" />
+        <TeamLogo espnAbbr={team?.espn_abbr} size={phone ? 64 : 110} className="drop-shadow-[0_14px_30px_rgba(0,0,0,.5)]" />
       </motion.div>
       <div className={cx("flex flex-col gap-3", right && "items-end")}>
         {picker}
-        <div className="display text-5xl font-bold tabular" style={{ color }}>
+        <div className="display text-5xl font-bold tabular max-sm:text-4xl" style={{ color }}>
           {record ? `${record[0]}–${record[1]}` : "—"}
         </div>
       </div>

@@ -108,7 +108,7 @@ function LineScore({ away, home }: { away: StorySide; home: StorySide }) {
   const n = Math.max(away.periods?.length ?? 0, home.periods?.length ?? 0);
   const label = (i: number) => (i < 4 ? `Q${i + 1}` : n - 4 > 1 ? `OT${i - 3}` : "OT");
   return (
-    <table className="w-full border-t border-line text-sm tabular">
+    <table className="phone-scroll w-full border-t border-line text-sm tabular">
       <thead>
         <tr className="text-[11px] uppercase tracking-wider text-muted">
           <th className="py-2 pl-6 text-left font-medium">Team</th>

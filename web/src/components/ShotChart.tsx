@@ -126,7 +126,7 @@ export function ShotChart({
     );
 
   return (
-    <div className="grid grid-cols-[1fr_200px] gap-5">
+    <div className="grid grid-cols-[1fr_200px] gap-5 max-sm:grid-cols-1">
       <div>
         <div className="mb-3 flex items-center justify-between">
           <div className="text-sm">

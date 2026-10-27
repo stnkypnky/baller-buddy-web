@@ -1,3 +1,4 @@
+import * as Dialog from "@radix-ui/react-dialog";
 import * as Popover from "@radix-ui/react-popover";
 import { useIsFetching, useQueryClient } from "@tanstack/react-query";
 import {
@@ -11,6 +12,7 @@ import {
   ChevronsLeft,
   ChevronsRight,
   LayoutDashboard,
+  Menu,
   Newspaper,
   Radio,
   RefreshCw,
@@ -110,7 +112,7 @@ export function Sidebar() {
     <motion.aside
       animate={{ width: collapsed ? 68 : 216 }}
       transition={{ type: "spring", stiffness: 320, damping: 34 }}
-      className="relative z-20 flex shrink-0 flex-col border-r border-line/60 bg-black/20 backdrop-blur-md"
+      className="relative z-20 flex shrink-0 flex-col border-r border-line/60 bg-black/20 backdrop-blur-md max-sm:hidden"
     >
       <nav className="scroll flex-1 overflow-x-hidden px-2.5 py-3">
         {NAV.map((g) => (
@@ -207,10 +209,10 @@ export function TopBar({ title }: { title?: ReactNode }) {
   }
 
   return (
-    <div className="flex h-16 shrink-0 items-center gap-3 px-6">
+    <div className="flex h-16 shrink-0 items-center gap-3 px-6 max-sm:gap-2 max-sm:px-3">
       <TeamSwitcher />
       <SeasonPicker />
-      <div className="min-w-0 flex-1 truncate pl-2 text-sm text-muted">{title}</div>
+      <div className="min-w-0 flex-1 truncate pl-2 text-sm text-muted max-sm:pl-0">{title}</div>
       <AnimatePresence>
         {fetching > 0 && (
           <motion.div
@@ -220,7 +222,7 @@ export function TopBar({ title }: { title?: ReactNode }) {
             className="flex items-center gap-2 text-xs text-muted"
           >
             <span className="size-1.5 animate-pulse rounded-full bg-team-text" />
-            Syncing
+            <span className="max-sm:hidden">Syncing</span>
           </motion.div>
         )}
       </AnimatePresence>
@@ -293,7 +295,7 @@ export function TeamSwitcher({
             e.preventDefault();
             inputRef.current?.focus();
           }}
-          className="z-[60] w-[560px] rounded-2xl border border-line bg-[#0d1017]/95 p-3 shadow-2xl backdrop-blur-xl data-[state=open]:animate-[pop_.16s_ease-out]"
+          className="z-[60] w-[min(560px,calc(100vw-1.5rem))] rounded-2xl border border-line bg-[#0d1017]/95 p-3 shadow-2xl backdrop-blur-xl data-[state=open]:animate-[pop_.16s_ease-out]"
         >
           <div className="mb-3 flex items-center gap-2 rounded-xl border border-line bg-black/30 px-3">
             <Search className="size-4 text-muted" />
@@ -306,11 +308,11 @@ export function TeamSwitcher({
               className="h-10 flex-1 bg-transparent text-sm outline-none placeholder:text-faint"
             />
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 gap-3 max-sm:max-h-[60vh] max-sm:overflow-y-auto max-sm:grid-cols-1">
             {(["East", "West"] as const).map((conf) => (
               <div key={conf}>
                 <div className="eyebrow mb-1.5 px-2">{conf}ern Conference</div>
-                <div className="scroll max-h-[360px] pr-1">
+                <div className="scroll max-h-[360px] pr-1 max-sm:max-h-none">
                   {filtered
                     .filter((t) => t.conference === conf)
                     .map((t) => (
@@ -345,7 +347,7 @@ function SeasonPicker() {
   return (
     <Popover.Root open={open} onOpenChange={setOpen}>
       <Popover.Trigger asChild>
-        <button className="group flex h-12 items-center gap-2 rounded-2xl border border-line bg-surface px-4 transition-colors hover:border-team-text/30 hover:bg-surface-2">
+        <button className="group flex h-12 items-center gap-2 rounded-2xl border border-line bg-surface px-4 transition-colors hover:border-team-text/30 hover:bg-surface-2 max-sm:px-3">
           <div className="text-left leading-tight">
             <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted">Season</div>
             <div className="display text-[17px] font-bold tracking-wide">{sel.season || "…"}</div>
@@ -378,5 +380,74 @@ function SeasonPicker() {
         </Popover.Content>
       </Popover.Portal>
     </Popover.Root>
+  );
+}
+
+/* ── Phone navigation ─────────────────────────────────────────────────────── */
+
+const TABS: NavItem[] = [
+  { to: "/", label: "Team", icon: <LayoutDashboard />, match: ["/roster", "/player", "/stats", "/trends"] },
+  { to: "/scores", label: "Scores", icon: <CalendarDays />, match: ["/league", "/compare"] },
+  { to: "/live", label: "Live", icon: <Radio />, match: ["/pulse"] },
+  { to: "/ai", label: "AI", icon: <Bot /> },
+];
+
+/** Under 640px the sidebar becomes a bottom tab bar plus a "More" sheet with
+ *  every page (the Android app's layout). */
+export function BottomNav() {
+  const { pathname } = useLocation();
+  const [more, setMore] = useState(false);
+  const isActive = (it: NavItem) =>
+    it.to === "/" ? pathname === "/" || !!it.match?.some((m) => pathname.startsWith(m)) : pathname.startsWith(it.to) || !!it.match?.some((m) => pathname.startsWith(m));
+  const tabActive = TABS.some(isActive);
+
+  return (
+    <>
+      <nav className="relative z-40 grid h-[60px] shrink-0 grid-cols-5 border-t border-line/60 bg-black/60 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl sm:hidden">
+        {TABS.map((it) => (
+          <NavLink key={it.to} to={it.to} className={cx("flex flex-col items-center justify-center gap-0.5 text-[10px] font-semibold", isActive(it) ? "text-team-text" : "text-muted")}>
+            <span className="[&>svg]:size-5">{it.icon}</span>
+            {it.label}
+          </NavLink>
+        ))}
+        <button onClick={() => setMore(true)} className={cx("flex flex-col items-center justify-center gap-0.5 text-[10px] font-semibold", !tabActive || more ? "text-team-text" : "text-muted")}>
+          <Menu className="size-5" />
+          More
+        </button>
+      </nav>
+      <Dialog.Root open={more} onOpenChange={setMore}>
+        <Dialog.Portal>
+          <Dialog.Overlay className="fixed inset-0 z-[70] bg-black/60 backdrop-blur-sm sm:hidden" />
+          <Dialog.Content className="scroll fixed inset-x-0 bottom-0 z-[71] max-h-[80vh] rounded-t-3xl border-t border-line bg-[#0d1017]/97 px-3 pt-3 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-2xl sm:hidden">
+            <Dialog.Title className="sr-only">All pages</Dialog.Title>
+            <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-white/15" />
+            {[...NAV, { group: "App", items: [{ to: "/settings", label: "Settings", icon: <Settings /> } as NavItem] }].map((g) => (
+              <div key={g.group} className="mb-3">
+                <div className="eyebrow mb-1.5 px-3 text-[10px]">{g.group}</div>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {g.items.map((it) => {
+                    const active = it.to === "/" ? pathname === "/" : pathname.startsWith(it.to) || !!it.match?.some((m) => pathname.startsWith(m));
+                    return (
+                      <NavLink
+                        key={it.to}
+                        to={it.to}
+                        onClick={() => setMore(false)}
+                        className={cx(
+                          "flex h-12 items-center gap-3 rounded-xl border px-3 text-[13px] font-medium",
+                          active ? "border-team-text/30 bg-team/20 text-fg" : "border-line bg-surface text-fg/85",
+                        )}
+                      >
+                        <span className={cx("[&>svg]:size-[18px]", active && "text-team-text")}>{it.icon}</span>
+                        {it.label}
+                      </NavLink>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
+    </>
   );
 }

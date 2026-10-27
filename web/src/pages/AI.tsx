@@ -51,7 +51,7 @@ export default function AIPage() {
 
   return (
     <div className="mx-auto flex min-h-full max-w-4xl flex-col">
-      <div className="mb-4 flex items-center justify-between gap-3 pt-1">
+      <div className="mb-4 flex items-center justify-between gap-3 pt-1 max-sm:flex-wrap">
         <div className="flex items-center gap-3">
           <div className="grid size-11 place-items-center rounded-2xl border border-line bg-black/30">
             <BallMark className="size-6" />
@@ -75,7 +75,7 @@ export default function AIPage() {
             <div className="mx-auto mb-5 w-fit">
               <TeamLogo espnAbbr={team?.espn_abbr} size={84} glow />
             </div>
-            <h2 className="display text-4xl font-bold uppercase">
+            <h2 className="display text-4xl font-bold uppercase max-sm:text-3xl">
               Ask anything about the <span className="text-team-text">{team?.nickname}</span>
             </h2>
             <p className="mx-auto mt-2 max-w-lg text-sm text-muted">
@@ -86,7 +86,7 @@ export default function AIPage() {
                 No AI is set up yet. Start LM Studio, or add an API key in Settings → AI Providers.
               </div>
             )}
-            <div className="mt-8 grid grid-cols-2 gap-3 text-left">
+            <div className="mt-8 grid grid-cols-2 gap-3 text-left max-sm:grid-cols-1">
               {suggestions.map((s, i) => (
                 <motion.button
                   key={s.q}

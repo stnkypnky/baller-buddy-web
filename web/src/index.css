@@ -154,3 +154,9 @@ button:disabled { cursor: default; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
+
+/* Phones: wide tables scroll sideways inside their panel instead of squeezing. */
+@media (max-width: 639px) {
+  table.phone-scroll { display: block; overflow-x: auto; white-space: nowrap; scrollbar-width: none; }
+  table.phone-scroll th, table.phone-scroll td { padding-right: 0.75rem; }
+}

@@ -70,7 +70,7 @@ export default function MusicDock() {
     <div className="relative z-40 shrink-0">
       <AnimatePresence>{p.expanded && <Playlist />}</AnimatePresence>
 
-      <div className="relative grid h-[72px] grid-cols-[minmax(240px,1fr)_minmax(380px,560px)_minmax(240px,1fr)] items-center gap-6 border-t border-line/60 bg-black/45 px-5 backdrop-blur-xl">
+      <div className="relative grid h-[72px] grid-cols-[minmax(240px,1fr)_minmax(380px,560px)_minmax(240px,1fr)] items-center gap-6 border-t border-line/60 bg-black/45 px-5 backdrop-blur-xl max-sm:h-16 max-sm:grid-cols-[minmax(0,1fr)_auto_auto] max-sm:gap-2 max-sm:px-3">
         {/* progress hairline across the top of the dock */}
         <div className="absolute inset-x-0 top-0 h-[2px] bg-white/[0.04]">
           <div className="h-full bg-team-text shadow-[0_0_12px_var(--team-glow)]" style={{ width: dur ? `${(pos / dur) * 100}%` : 0 }} />
@@ -94,9 +94,11 @@ export default function MusicDock() {
         {/* transport */}
         <div className={cx("flex flex-col items-center gap-1", empty && "pointer-events-none opacity-40")}>
           <div className="flex items-center gap-1.5">
-            <Ctl label={p.shuffle ? "Shuffle on" : "Shuffle off"} onClick={toggleShuffle} active={p.shuffle}>
-              <Shuffle className="size-4" />
-            </Ctl>
+            <span className="contents max-sm:hidden">
+              <Ctl label={p.shuffle ? "Shuffle on" : "Shuffle off"} onClick={toggleShuffle} active={p.shuffle}>
+                <Shuffle className="size-4" />
+              </Ctl>
+            </span>
             <Ctl label="Previous (restarts if >3s in)" onClick={prev}>
               <SkipBack className="size-[18px] fill-current" />
             </Ctl>
@@ -112,14 +114,16 @@ export default function MusicDock() {
             <Ctl label="Next" onClick={() => next()}>
               <SkipForward className="size-[18px] fill-current" />
             </Ctl>
-            <Ctl label={{ none: "Loop off", all: "Loop all", one: "Loop one" }[p.loop]} onClick={cycleLoop} active={p.loop !== "none"}>
-              {p.loop === "one" ? <Repeat1 className="size-4" /> : <Repeat className="size-4" />}
-            </Ctl>
-            <Ctl label="Stop" onClick={stop}>
-              <Square className="size-3.5 fill-current" />
-            </Ctl>
+            <span className="contents max-sm:hidden">
+              <Ctl label={{ none: "Loop off", all: "Loop all", one: "Loop one" }[p.loop]} onClick={cycleLoop} active={p.loop !== "none"}>
+                {p.loop === "one" ? <Repeat1 className="size-4" /> : <Repeat className="size-4" />}
+              </Ctl>
+              <Ctl label="Stop" onClick={stop}>
+                <Square className="size-3.5 fill-current" />
+              </Ctl>
+            </span>
           </div>
-          <div className="flex w-full items-center gap-2.5 text-[10px] text-muted tabular">
+          <div className="flex w-full items-center gap-2.5 text-[10px] text-muted tabular max-sm:hidden">
             <span className="w-9 text-right">{fmtTime(pos)}</span>
             <Slider.Root
               className="group relative flex h-3 flex-1 touch-none items-center select-none"
@@ -143,7 +147,8 @@ export default function MusicDock() {
         </div>
 
         {/* volume + playlist */}
-        <div className="flex items-center justify-end gap-3">
+        <div className="flex items-center justify-end gap-3 max-sm:gap-0">
+          <span className="contents max-sm:hidden">
           <Equalizer active={playing} />
           <Ctl label={p.muted ? "Unmute" : "Mute"} onClick={toggleMute}>
             {p.muted || p.volume === 0 ? <VolumeX className="size-4" /> : p.volume < 50 ? <Volume1 className="size-4" /> : <Volume2 className="size-4" />}
@@ -161,6 +166,7 @@ export default function MusicDock() {
             </Slider.Track>
             <Slider.Thumb className="block size-3 scale-0 rounded-full bg-white shadow transition-transform group-hover:scale-100 focus:outline-none" />
           </Slider.Root>
+          </span>
           <Ctl label={p.expanded ? "Hide playlist" : "Show playlist"} onClick={() => toggleExpanded()} active={p.expanded}>
             {p.expanded ? <ChevronUp className="size-4 rotate-180" /> : <ListMusic className="size-4" />}
           </Ctl>
@@ -290,7 +296,7 @@ function Playlist() {
       animate={{ y: 0, opacity: 1 }}
       exit={{ y: 30, opacity: 0 }}
       transition={{ type: "spring", stiffness: 320, damping: 32 }}
-      className="absolute right-4 bottom-[80px] flex h-[420px] w-[460px] flex-col overflow-hidden rounded-2xl border border-line bg-[#0b0e14]/95 shadow-2xl backdrop-blur-xl"
+      className="absolute right-4 bottom-[80px] flex h-[420px] w-[460px] flex-col overflow-hidden rounded-2xl border border-line bg-[#0b0e14]/95 shadow-2xl backdrop-blur-xl max-sm:right-2 max-sm:bottom-[72px] max-sm:left-2 max-sm:h-[60vh] max-sm:w-auto"
     >
       <div className="flex items-center justify-between border-b border-line px-4 py-3">
         <div>

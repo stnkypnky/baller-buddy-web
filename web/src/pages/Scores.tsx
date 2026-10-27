@@ -60,14 +60,14 @@ export default function ScoresPage() {
           <div className="eyebrow text-team-text">{sel.season}</div>
           <h1 className="display text-4xl font-bold uppercase">Scores</h1>
         </div>
-        <div className="flex items-center gap-3">
-          <div className="flex h-10 items-center gap-2 rounded-xl border border-line bg-surface px-3">
+        <div className="flex items-center gap-3 max-sm:w-full max-sm:flex-wrap max-sm:gap-2">
+          <div className="flex h-10 items-center gap-2 rounded-xl border border-line bg-surface px-3 max-sm:flex-1">
             <Search className="size-4 text-muted" />
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Team (e.g. LAL)"
-              className="w-32 bg-transparent text-sm outline-none placeholder:text-faint"
+              className="w-32 bg-transparent text-sm outline-none placeholder:text-faint max-sm:w-full max-sm:min-w-0"
             />
           </div>
           <label className="flex cursor-pointer items-center gap-2 text-[13px] text-muted">
@@ -198,24 +198,30 @@ function ScoreRow({ g, myAbbr, onOpen }: { g: ScoreGame; myAbbr?: string; onOpen
         onOpen({ gameId: g.game_id, title: `${g.away.abbr} @ ${g.home.abbr}`, subtitle: `${shortDate(g.date, true)}${g.ot ? " · OT" : ""}` })
       }
       className={cx(
-        "mx-1 grid h-[52px] w-[calc(100%-0.5rem)] grid-cols-[1fr_auto_1fr_120px] items-center gap-4 rounded-xl px-4 text-left transition-colors hover:bg-white/[0.045]",
+        "mx-1 grid h-[52px] w-[calc(100%-0.5rem)] grid-cols-[1fr_auto_1fr_120px] items-center gap-4 rounded-xl px-4 text-left transition-colors hover:bg-white/[0.045] max-sm:grid-cols-[1fr_auto_1fr_auto] max-sm:gap-2 max-sm:px-2",
         mine && "bg-team/10 ring-1 ring-team-text/25",
       )}
     >
       <div className="flex items-center justify-end gap-3">
-        <span className={cx("text-[13px] font-semibold", awayWon ? "text-fg" : "text-muted")}>{away?.name ?? g.away.abbr}</span>
+        <span className={cx("text-[13px] font-semibold", awayWon ? "text-fg" : "text-muted")}>
+          <span className="max-sm:hidden">{away?.name ?? g.away.abbr}</span>
+          <span className="sm:hidden">{g.away.abbr}</span>
+        </span>
         <TeamLogo espnAbbr={away?.espn_abbr} size={28} />
       </div>
-      <div className="display flex w-28 items-center justify-center gap-2 text-2xl font-bold tabular">
+      <div className="display flex w-28 items-center justify-center gap-2 text-2xl font-bold tabular max-sm:w-auto max-sm:text-xl">
         <span className={awayWon ? "text-fg" : "text-faint"}>{g.away.pts}</span>
         <span className="text-sm text-faint">–</span>
         <span className={!awayWon ? "text-fg" : "text-faint"}>{g.home.pts}</span>
       </div>
       <div className="flex items-center gap-3">
         <TeamLogo espnAbbr={home?.espn_abbr} size={28} />
-        <span className={cx("text-[13px] font-semibold", !awayWon ? "text-fg" : "text-muted")}>{home?.name ?? g.home.abbr}</span>
+        <span className={cx("text-[13px] font-semibold", !awayWon ? "text-fg" : "text-muted")}>
+          <span className="max-sm:hidden">{home?.name ?? g.home.abbr}</span>
+          <span className="sm:hidden">{g.home.abbr}</span>
+        </span>
       </div>
-      <div className="flex justify-end gap-1.5 text-[10px] font-semibold uppercase tracking-wider">
+      <div className="flex justify-end gap-1.5 text-[10px] font-semibold uppercase tracking-wider max-sm:flex-col max-sm:items-end max-sm:gap-0.5">
         {g.ot && <span className="rounded bg-warn/15 px-1.5 py-0.5 text-warn">OT</span>}
         {margin <= 3 && <span className="rounded bg-white/10 px-1.5 py-0.5 text-fg/80">Thriller</span>}
         {margin >= 25 && <span className="rounded bg-white/5 px-1.5 py-0.5 text-muted">Blowout</span>}

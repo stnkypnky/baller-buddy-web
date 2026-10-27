@@ -83,12 +83,12 @@ export default function PlayerPage() {
           <div className="pointer-events-none absolute -right-8 -bottom-20 opacity-[0.07]">
             <TeamLogo espnAbbr={team?.espn_abbr} size={360} />
           </div>
-          <div className="relative flex items-end gap-8 px-8 pt-6">
+          <div className="relative flex items-end gap-8 px-8 pt-6 max-sm:flex-col max-sm:items-stretch max-sm:gap-1 max-sm:px-4">
             <motion.div
               initial={{ opacity: 0, y: 30 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ type: "spring", stiffness: 160, damping: 20 }}
-              className="w-[300px] shrink-0"
+              className="w-[300px] shrink-0 max-sm:mx-auto max-sm:w-[220px]"
             >
               {p ? (
                 <Headshot pid={p.pid} name={p.name} size="large" className="aspect-[4/3] w-full drop-shadow-[0_20px_40px_rgba(0,0,0,.6)]" />
@@ -96,14 +96,14 @@ export default function PlayerPage() {
                 <Skeleton className="aspect-[4/3] w-full" />
               )}
             </motion.div>
-            <div className="min-w-0 flex-1 pb-7">
+            <div className="min-w-0 flex-1 pb-7 max-sm:pb-5">
               <div className="flex items-center gap-2">
                 <TeamLogo espnAbbr={team?.espn_abbr} size={22} />
                 <span className="eyebrow text-team-text">
                   {team?.name} · {p?.pos || bio?.position || "—"} · {sel.season}
                 </span>
               </div>
-              <h1 className="display mt-1 text-[60px] leading-[0.92] font-bold uppercase">
+              <h1 className="display mt-1 text-[60px] leading-[0.92] font-bold uppercase max-sm:text-[38px]">
                 {p?.name ?? bio?.name ?? (isLoading ? "Loading…" : "Player not on this roster")}
               </h1>
               {bio && (
@@ -146,7 +146,7 @@ export default function PlayerPage() {
                   </div>
                 </div>
               )}
-              <div className="mt-5 flex flex-wrap gap-6">
+              <div className="mt-5 flex flex-wrap gap-6 max-sm:gap-x-4 max-sm:gap-y-3">
                 {p &&
                   [
                     ["PTS", p.ppg],
@@ -157,15 +157,15 @@ export default function PlayerPage() {
                     ["MIN", p.mpg],
                   ].map(([l, v]) => (
                     <div key={l as string}>
-                      <div className="display text-4xl font-bold">
+                      <div className="display text-4xl font-bold max-sm:text-3xl">
                         <AnimatedNumber value={v as number} />
                       </div>
                       <div className="text-[11px] font-semibold tracking-wider text-muted">{l}</div>
                     </div>
                   ))}
                 {p && (
-                  <div className="ml-2 border-l border-line pl-6">
-                    <div className="display text-4xl font-bold">{p.gp}</div>
+                  <div className="ml-2 border-l border-line pl-6 max-sm:ml-0 max-sm:pl-4">
+                    <div className="display text-4xl font-bold max-sm:text-3xl">{p.gp}</div>
                     <div className="text-[11px] font-semibold tracking-wider text-muted">GAMES</div>
                   </div>
                 )}
@@ -175,14 +175,14 @@ export default function PlayerPage() {
         </Panel>
       </Item>
 
-      <Item className="grid grid-cols-9 gap-3">
+      <Item className="grid grid-cols-9 gap-3 max-sm:grid-cols-3 max-sm:gap-2">
         {ADV.map((a) => {
           const v = data?.advanced[a.key];
           return (
             <Tip key={a.key} label={a.def}>
-              <div className="panel cursor-help p-4">
+              <div className="panel cursor-help p-4 max-sm:p-3">
                 <div className="text-[11px] font-semibold tracking-wider text-team-text">{a.label}</div>
-                <div className="display mt-1 text-[28px] leading-none font-bold">
+                <div className="display mt-1 text-[28px] leading-none font-bold max-sm:text-[22px]">
                   {v == null ? "—" : <AnimatedNumber value={a.pct ? v * 100 : v} format={(x) => (a.pct ? `${x.toFixed(1)}%` : x.toFixed(2))} />}
                 </div>
               </div>
@@ -191,9 +191,9 @@ export default function PlayerPage() {
         })}
         {(["pts", "reb", "ast"] as const).map((k) => (
           <Tip key={k} label={`${k.toUpperCase()} per 36 minutes`}>
-            <div className="panel cursor-help p-4">
+            <div className="panel cursor-help p-4 max-sm:p-3">
               <div className="text-[11px] font-semibold tracking-wider text-team-text">P36 {k.toUpperCase()}</div>
-              <div className="display mt-1 text-[28px] leading-none font-bold">
+              <div className="display mt-1 text-[28px] leading-none font-bold max-sm:text-[22px]">
                 <AnimatedNumber value={data?.per36[k]} />
               </div>
             </div>
@@ -231,7 +231,7 @@ export default function PlayerPage() {
             {isLoading ? (
               <Skeleton className="h-[380px]" />
             ) : games.length ? (
-              <div className="min-h-[380px] flex-1">
+              <div className="min-h-[380px] flex-1 max-sm:min-h-[280px]">
                 <ResponsiveContainer width="100%" height="100%">
                   <ComposedChart data={games} margin={{ top: 10, right: 6, left: -12, bottom: 0 }}>
                     <defs>

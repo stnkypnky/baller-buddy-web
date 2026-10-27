@@ -79,7 +79,7 @@ export default function StatsPage() {
             ) : ov.error ? (
               <ErrorState error={ov.error} />
             ) : (
-              <table className="w-full text-[13px] tabular">
+              <table className="phone-scroll w-full text-[13px] tabular">
                 <thead>
                   <tr className="text-[11px] uppercase tracking-wider text-muted">
                     <th className="pb-2 text-left font-medium">Stat</th>
@@ -163,7 +163,7 @@ export default function StatsPage() {
           {hist.isLoading ? (
             <Skeleton className="h-64" />
           ) : (
-            <table className="w-full text-[13px] tabular">
+            <table className="phone-scroll w-full text-[13px] tabular">
               <thead>
                 <tr className="text-[11px] uppercase tracking-wider text-muted">
                   <th className="pb-2 text-left font-medium">Season</th>
