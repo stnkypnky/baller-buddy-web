@@ -1,0 +1,13 @@
+# The alerts cron: a separate Worker (Pages Functions can't run on a schedule).
+# Deploy with `npm run deploy:cron`. It shares the PUSH KV namespace and the
+# VAPID keys with the Pages project; see README → "Background alerts".
+name = "baller-buddy-alerts"
+main = "index.ts"
+compatibility_date = "2026-10-01"
+
+[triggers]
+crons = ["* * * * *"]
+
+[[kv_namespaces]]
+binding = "PUSH"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"

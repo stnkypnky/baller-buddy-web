@@ -1,0 +1,8 @@
+# Cloudflare Pages project. `npm run build` writes dist/; functions/ is the API.
+name = "baller-buddy"
+pages_build_output_dir = "dist"
+compatibility_date = "2026-10-01"
+
+[[kv_namespaces]]
+binding = "PUSH"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
