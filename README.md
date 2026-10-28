@@ -83,13 +83,15 @@ One-time setup:
 1. **Create the Worker from GitHub.** dash.cloudflare.com → Workers & Pages →
    Create application → connect `stnkypnky/baller-buddy-web`. Build command
    `npm run build`, deploy command `npx wrangler deploy`. Leave "Protect with
-   Cloudflare Access" off. Deploy; the address is
-   `https://baller-buddy-web.<account-subdomain>.workers.dev`.
+   Cloudflare Access" off. Deploy. On the Worker's page, the **Domains** tab
+   should show workers.dev as Enabled, at
+   `https://baller-buddy-web.<account-subdomain>.workers.dev`, and the **Access**
+   tab should be off.
 2. **KV namespace** for push subscriptions: nothing to do. `wrangler.jsonc` declares
    the `PUSH` binding without an id, so the first deploy creates the namespace and
    links it.
-3. **Secrets.** Run `node scripts/vapid-keys.mjs`. In the Worker → Settings →
-   Variables and Secrets (the runtime ones, not Build) add `VAPID_PUBLIC_KEY`
+3. **Secrets.** Run `node scripts/vapid-keys.mjs`. On the Worker's **Settings**
+   tab → Variables and Secrets (the runtime ones, not Build) add `VAPID_PUBLIC_KEY`
    (text), `VAPID_PRIVATE_KEY` (secret), `VAPID_SUBJECT` (text,
    `mailto:you@example.com`) and `PUSH_PASSCODE` (secret, any phrase you'll
    remember: you type it once per device when turning on background alerts).
@@ -97,7 +99,7 @@ One-time setup:
 The account subdomain in the address is visible to anyone with the link; rename
 it under Workers & Pages → Account details if you'd rather it didn't look like
 your email. Every push to `main` deploys; CI (GitHub Actions) runs the
-typecheck, tests and build. The cron shows under the Worker → Settings → Triggers.
+typecheck, tests and build. The cron shows on the Worker's Overview tab, under Triggers.
 
 ## Install on each device
 
