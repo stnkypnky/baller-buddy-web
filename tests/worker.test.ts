@@ -1,3 +1,5 @@
+// @vitest-environment node
+// (happy-dom drops "forbidden" request headers like Origin; the Worker sees them.)
 /** The Worker's routing, proxy allowlist and push endpoints (offline). */
 
 import { describe, expect, it } from "vitest";
@@ -17,7 +19,8 @@ class FakeKV {
 const assets = { fetch: async () => new Response("<html>app</html>", { headers: { "content-type": "text/html" } }) };
 const mkEnv = (extra: object = {}) => ({ ASSETS: assets, PUSH: new FakeKV(), VAPID_PUBLIC_KEY: "", VAPID_PRIVATE_KEY: "", ...extra }) as any;
 const req = (path: string, init?: RequestInit) => new Request(`https://app.test${path}`, init);
-const post = (path: string, body: unknown) => req(path, { method: "POST", body: JSON.stringify(body) });
+const post = (path: string, body: unknown, headers: Record<string, string> = {}) => req(path, { method: "POST", body: JSON.stringify(body), headers });
+const PASS = { "X-Push-Passcode": "letmein" };
 
 describe("worker routes", () => {
   it("serves the app for everything but /api", async () => {
@@ -46,13 +49,35 @@ describe("worker routes", () => {
     expect((await route(req("/api/push/subscribe"), mkEnv())).status).toBe(405); // GET
   });
 
+  it("refuses calls from other websites", async () => {
+    const proxy = `/api/proxy?url=${encodeURIComponent("https://site.api.espn.com/apis/site/v2/sports/basketball/nba/news")}`;
+    expect((await route(req(proxy, { headers: { Origin: "https://evil.example" } }), mkEnv())).status).toBe(403);
+    expect((await route(req(proxy, { headers: { "Sec-Fetch-Site": "cross-site" } }), mkEnv())).status).toBe(403);
+    expect((await route(post("/api/push/subscribe", {}, { Origin: "https://evil.example" }), mkEnv({ PUSH_PASSCODE: "letmein" }))).status).toBe(403);
+    // the app itself (same origin) gets through to the route
+    expect((await route(req("/api/push/key", { headers: { Origin: "https://app.test", "Sec-Fetch-Site": "same-origin" } }), mkEnv({ VAPID_PUBLIC_KEY: "B" }))).status).toBe(200);
+    // the app's pages themselves are never blocked
+    expect((await route(req("/", { headers: { "Sec-Fetch-Site": "cross-site" } }), mkEnv())).status).toBe(200);
+  });
+
+  it("asks for the passcode before accepting a device", async () => {
+    const sub = { subscription: { endpoint: "https://push.example/abc", keys: { p256dh: "k", auth: "a" } } };
+    expect((await route(post("/api/push/subscribe", sub, PASS), mkEnv())).status).toBe(503); // not configured
+    const env = mkEnv({ PUSH_PASSCODE: "letmein" });
+    expect((await route(post("/api/push/subscribe", sub), env)).status).toBe(401);
+    expect((await route(post("/api/push/subscribe", sub, { "X-Push-Passcode": "guess" }), env)).status).toBe(401);
+    expect((await route(post("/api/push/test", { endpoint: "https://push.example/abc" }), env)).status).toBe(401);
+    expect(env.PUSH.data.size).toBe(0); // nothing stored
+    expect((await route(post("/api/push/subscribe", sub, PASS), env)).status).toBe(200);
+  });
+
   it("validates, stores, updates and removes subscriptions", async () => {
-    const env = mkEnv();
+    const env = mkEnv({ PUSH_PASSCODE: "letmein" });
     const sub = { endpoint: "https://push.example/abc", keys: { p256dh: "k", auth: "a" } };
-    expect((await route(post("/api/push/subscribe", { subscription: { endpoint: "http://x", keys: {} } }), env)).status).toBe(400);
+    expect((await route(post("/api/push/subscribe", { subscription: { endpoint: "http://x", keys: {} } }, PASS), env)).status).toBe(400);
 
     const prefs = { followed: [2, "13", -1, "x"], quiet_start: "23:00", quiet_end: "bogus", close: false };
-    expect((await route(post("/api/push/subscribe", { subscription: sub, prefs, tz: "America/New_York" }), env)).status).toBe(200);
+    expect((await route(post("/api/push/subscribe", { subscription: sub, prefs, tz: "America/New_York" }, PASS), env)).status).toBe(200);
     const subs = JSON.parse(env.PUSH.data.get("subs"));
     const [stored] = Object.values(subs) as any[];
     expect(stored.prefs).toMatchObject({ followed: [2, 13], quiet_start: "23:00", quiet_end: "", close: false, tipoff: true });
@@ -60,10 +85,10 @@ describe("worker routes", () => {
 
     // same payload again: no rewrite
     const before = env.PUSH.data.get("subs");
-    await route(post("/api/push/subscribe", { subscription: sub, prefs, tz: "America/New_York" }), env);
+    await route(post("/api/push/subscribe", { subscription: sub, prefs, tz: "America/New_York" }, PASS), env);
     expect(env.PUSH.data.get("subs")).toBe(before);
 
-    expect((await route(post("/api/push/test", { endpoint: "https://push.example/other" }), env)).status).toBe(404);
+    expect((await route(post("/api/push/test", { endpoint: "https://push.example/other" }, PASS), env)).status).toBe(404);
     expect((await route(post("/api/push/unsubscribe", { endpoint: sub.endpoint }), env)).status).toBe(200);
     expect(Object.keys(JSON.parse(env.PUSH.data.get("subs")))).toEqual([]);
   });

@@ -5,6 +5,7 @@
 import { processGames, inQuietHours, SAMPLES, type AlertKind, type GameState } from "../../../shared/alertsCore";
 import { fetchScoreboard } from "./nba/data";
 import { ESPN_IDS, getTeamName } from "./nba/teams";
+import { deleteKey, getKey, setKey } from "./llm/keys";
 import * as settings from "./settings";
 
 export interface AlertEvent {
@@ -93,7 +94,10 @@ function b64urlToBytes(s: string) {
 
 async function subscription(create: boolean): Promise<PushSubscription | null> {
   if (!pushSupported()) return null;
-  const reg = await navigator.serviceWorker.ready;
+  // Only wait for the service worker when subscribing: a status check before it
+  // has installed (or in dev, where there is none) would otherwise hang.
+  const reg = create ? await navigator.serviceWorker.ready : await navigator.serviceWorker.getRegistration();
+  if (!reg) return null;
   const have = await reg.pushManager.getSubscription();
   if (have || !create) return have;
   if (Notification.permission !== "granted" && (await Notification.requestPermission()) !== "granted") return null;
@@ -103,9 +107,17 @@ async function subscription(create: boolean): Promise<PushSubscription | null> {
   return reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64urlToBytes(key) });
 }
 
-/** Tell the cron what this device wants: followed teams, kinds, quiet hours. */
-export async function syncPush(opts: { create?: boolean } = {}) {
+// The passcode the Worker asks for before it accepts a device for alerts
+// (PUSH_PASSCODE). Kept encrypted next to the AI keys.
+const PASSCODE = "push-passcode";
+
+/** Tell the cron what this device wants: followed teams, kinds, quiet hours.
+ *  `passcode` is saved for later syncs when the Worker accepts it. */
+export async function syncPush(opts: { create?: boolean; passcode?: string } = {}): Promise<{ push: boolean; reason?: string }> {
   try {
+    const passcode = opts.passcode?.trim() || (await getKey(PASSCODE));
+    if (opts.create && !passcode) return { push: false, reason: "passcode" };
+    const had = await subscription(false);
     const sub = await subscription(!!opts.create);
     if (!sub) return { push: false };
     const prefs = await settings.get("alerts");
@@ -113,13 +125,21 @@ export async function syncPush(opts: { create?: boolean } = {}) {
     const followed = prefs.followed?.length ? prefs.followed : ui.team_id ? [ui.team_id] : [];
     const r = await fetch("/api/push/subscribe", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "X-Push-Passcode": passcode },
       body: JSON.stringify({
         subscription: sub.toJSON(),
         prefs: { ...prefs, followed: followed.map((i) => ESPN_IDS[getTeamName(i)]).filter(Boolean) },
         tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
       }),
     });
+    if (r.status === 401 || r.status === 503) {
+      // Not accepted: forget the code, and don't leave a browser subscription
+      // the server doesn't know about.
+      if (r.status === 401) await deleteKey(PASSCODE);
+      if (!had) await sub.unsubscribe().catch(() => {});
+      return { push: false, reason: r.status === 401 ? "passcode" : "server" };
+    }
+    if (r.ok && opts.passcode) await setKey(PASSCODE, opts.passcode.trim());
     return { push: r.ok };
   } catch (e) {
     console.info("push sync failed:", e);
@@ -129,7 +149,7 @@ export async function syncPush(opts: { create?: boolean } = {}) {
 
 export async function pushStatus() {
   if (!pushSupported()) return { supported: false, subscribed: false, permission: "unsupported" };
-  return { supported: true, subscribed: !!(await subscription(false)), permission: Notification.permission };
+  return { supported: true, subscribed: !!(await subscription(false)), permission: Notification.permission, passcodeSaved: !!(await getKey(PASSCODE)) };
 }
 
 export async function unsubscribePush() {
@@ -149,7 +169,7 @@ export async function testPush(kind: AlertKind) {
   if (!sub) return false;
   const r = await fetch("/api/push/test", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "X-Push-Passcode": await getKey(PASSCODE) },
     body: JSON.stringify({ endpoint: sub.endpoint, kind }),
   }).catch(() => null);
   return !!r?.ok;

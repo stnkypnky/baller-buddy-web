@@ -14,6 +14,8 @@ export interface PushEnv {
   VAPID_PUBLIC_KEY: string;
   VAPID_PRIVATE_KEY: string;
   VAPID_SUBJECT?: string;
+  /** Shared passcode a device must send to sign up for alerts (Worker secret). */
+  PUSH_PASSCODE?: string;
 }
 
 export interface Subscriber {

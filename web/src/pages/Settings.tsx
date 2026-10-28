@@ -407,7 +407,16 @@ function AlertSettings() {
     <Panel className="p-5">
       <SectionTitle
         right={
-          <Button variant="ghost" size="sm" onClick={() => post("/alerts/simulate?kind=close").then(() => toast("Test alert sent"))}>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={async () => {
+              await post("/alerts/simulate?kind=close");
+              // With background alerts on, also check a real push gets through.
+              const push = await post<{ ok: boolean }>("/alerts/push/test?kind=close").catch(() => ({ ok: false }));
+              toast(push.ok ? "Test alert sent (and a push notification)" : "Test alert sent");
+            }}
+          >
             Send test
           </Button>
         }
@@ -591,29 +600,68 @@ function MusicSettings() {
   );
 }
 
-/** Background alerts: Web Push from the server, so they arrive with the app closed. */
+/** Background alerts: Web Push from the server, so they arrive with the app
+ *  closed. Turning them on asks once for the passcode set on the Worker. */
 function PushToggle({ disabled }: { disabled: boolean }) {
   const qc = useQueryClient();
-  const { data } = useQuery({ queryKey: ["push-status"], queryFn: () => api<{ supported: boolean; subscribed: boolean; permission: string }>("/alerts/push") });
+  const { data } = useQuery({
+    queryKey: ["push-status"],
+    queryFn: () => api<{ supported: boolean; subscribed: boolean; permission: string; passcodeSaved?: boolean }>("/alerts/push"),
+  });
+  const [asking, setAsking] = useState(false);
+  const [code, setCode] = useState("");
+  const [busy, setBusy] = useState(false);
   if (!data) return null;
   if (!data.supported) {
     return <div className="py-2 text-xs text-faint">This browser can't receive alerts while the app is closed. Installing the app (Add to Home Screen) may enable it.</div>;
   }
+
+  async function turn(on: boolean, passcode?: string) {
+    setBusy(true);
+    try {
+      qc.setQueryData(["push-status"], await post("/alerts/push", { enabled: on, passcode }));
+      setAsking(false);
+      setCode("");
+      if (on) toast.success("Alerts will arrive even when the app is closed");
+    } catch (e) {
+      const msg = (e as Error).message;
+      if ((e as { status?: number }).status === 401) {
+        setAsking(true);
+        if (passcode) toast.error(msg);
+      } else toast.error(msg);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div className={cx(disabled && "pointer-events-none opacity-40")}>
       <Toggle
         checked={data.subscribed}
-        onChange={async (v) => {
-          try {
-            qc.setQueryData(["push-status"], await post("/alerts/push", { enabled: v }));
-            if (v) toast.success("Alerts will arrive even when the app is closed");
-          } catch (e) {
-            toast.error((e as Error).message);
-          }
-        }}
+        onChange={(v) => (v && !data.passcodeSaved ? setAsking(true) : turn(v))}
         label="Notify me when the app is closed"
         hint={data.permission === "denied" ? "Notifications are blocked for this site in your browser settings" : "Push notifications on this device"}
       />
+      {asking && !data.subscribed && (
+        <div className="mb-2 flex gap-2">
+          <input
+            type="password"
+            autoFocus
+            value={code}
+            onChange={(e) => setCode(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && code.trim() && turn(true, code)}
+            placeholder="Alerts passcode"
+            className="h-9 min-w-0 flex-1 rounded-xl border border-line bg-black/30 px-3 text-[13px] outline-none focus:border-team-text/40"
+            autoComplete="off"
+          />
+          <Button size="sm" onClick={() => turn(true, code)} disabled={!code.trim() || busy}>
+            {busy ? <Spinner /> : null} Turn on
+          </Button>
+          <Button variant="ghost" size="sm" onClick={() => (setAsking(false), setCode(""))}>
+            Cancel
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

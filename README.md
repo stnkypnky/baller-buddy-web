@@ -67,30 +67,36 @@ page); enter it on the provider's card in Settings.
 
 ## Deploy (Cloudflare, free plan)
 
-One Worker serves the app, the API routes and the alerts cron. One-time setup,
-about 15 minutes.
+One Worker serves the app, the API routes and the alerts cron. The site is
+public, like a GitHub Pages site: anyone with the link can open it. What
+stays protected:
+
+- **Alerts sign-up needs a passcode** (`PUSH_PASSCODE`), so strangers can't fill
+  the 50 device slots or use up the day's KV writes.
+- **The data proxy and AI relay refuse calls from other websites** and only reach
+  an allowlist of hosts (NBA, ESPN, news feeds, search, AI providers).
+- **AI keys never leave each browser.** On Cloudflare's free plan, going over a
+  limit pauses the service until the next day; it never bills you.
+
+One-time setup:
 
 1. **Create the Worker from GitHub.** dash.cloudflare.com → Workers & Pages →
    Create application → connect `stnkypnky/baller-buddy-web`. Build command
-   `npm run build`, deploy command `npx wrangler deploy` (the defaults are fine).
-   Turn **Protect with Cloudflare Access** on (step 4 explains it). Deploy; you get
-   `https://baller-buddy-<you>.workers.dev`.
+   `npm run build`, deploy command `npx wrangler deploy`. Leave "Protect with
+   Cloudflare Access" off. Deploy; the address is
+   `https://baller-buddy-web.<account-subdomain>.workers.dev`.
 2. **KV namespace** for push subscriptions: nothing to do. `wrangler.jsonc` declares
    the `PUSH` binding without an id, so the first deploy creates the namespace and
-   links it. If that ever fails, create one under Storage & Databases → KV and put
-   its id in `wrangler.jsonc` as `"id": "…"`.
-3. **Push keys.** Run `node scripts/vapid-keys.mjs`. In the Worker → Settings →
+   links it.
+3. **Secrets.** Run `node scripts/vapid-keys.mjs`. In the Worker → Settings →
    Variables and Secrets (the runtime ones, not Build) add `VAPID_PUBLIC_KEY`
-   (text), `VAPID_PRIVATE_KEY` (secret) and `VAPID_SUBJECT` (text,
-   `mailto:you@example.com`).
-4. **Lock it to you.** Zero Trust → Access → Applications: the Worker's
-   application (created by the toggle in step 1) → Policies → Allow → Emails →
-   your address. Sign-in is a one-time code by email. The cron runs inside
-   Cloudflare, so Access doesn't affect it. If the browser offers no "Install"
-   afterwards, add a *Bypass* policy for `/manifest.webmanifest`, `/icon-*.png`
-   and `/sw.js`.
+   (text), `VAPID_PRIVATE_KEY` (secret), `VAPID_SUBJECT` (text,
+   `mailto:you@example.com`) and `PUSH_PASSCODE` (secret, any phrase you'll
+   remember: you type it once per device when turning on background alerts).
 
-After that, every push to `main` deploys; CI (GitHub Actions) runs the
+The account subdomain in the address is visible to anyone with the link; rename
+it under Workers & Pages → Account details if you'd rather it didn't look like
+your email. Every push to `main` deploys; CI (GitHub Actions) runs the
 typecheck, tests and build. The cron shows under the Worker → Settings → Triggers.
 
 ## Install on each device
@@ -105,7 +111,8 @@ typecheck, tests and build. The cron shows under the Worker → Settings → Tri
   installed icon (iOS 16.4+).
 
 Then in Settings: add AI keys (each device keeps its own), pick music, and
-turn on "Notify me when the app is closed" under Live game alerts.
+turn on "Notify me when the app is closed" under Live game alerts (it asks for
+the alerts passcode once), then "Send test".
 
 ## Data sources
 

@@ -15,9 +15,18 @@ interface Env extends PushEnv {
 const notFound = () => new Response(JSON.stringify({ detail: "Not Found" }), { status: 404, headers: { "content-type": "application/json" } });
 const wrongMethod = () => new Response("method not allowed", { status: 405 });
 
+/** True for calls made by another website's pages (the API is only for this app). */
+function fromOtherSite(request: Request, url: URL) {
+  if (request.headers.get("sec-fetch-site") === "cross-site") return true;
+  const origin = request.headers.get("origin");
+  return !!origin && origin !== url.origin;
+}
+
 export async function route(request: Request, env: Env): Promise<Response> {
-  const { pathname } = new URL(request.url);
+  const url = new URL(request.url);
+  const { pathname } = url;
   const post = request.method === "POST";
+  if (pathname.startsWith("/api/") && fromOtherSite(request, url)) return new Response("forbidden", { status: 403 });
   switch (pathname) {
     case "/api/proxy":
       return handleProxy(request, typeof caches !== "undefined" ? (caches as any).default : undefined);

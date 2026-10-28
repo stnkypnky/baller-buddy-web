@@ -218,7 +218,9 @@ route("POST", "/alerts/push", async (_m, _q, body) => {
     await alerts.unsubscribePush();
     return alerts.pushStatus();
   }
-  const r = await alerts.syncPush({ create: true });
+  const r = await alerts.syncPush({ create: true, passcode: typeof body?.passcode === "string" ? body.passcode : undefined });
+  if (r.reason === "passcode") throw new ApiError(401, body?.passcode ? "Wrong passcode" : "Enter the alerts passcode");
+  if (r.reason === "server") throw new ApiError(503, "Background alerts aren't set up on the server yet (PUSH_PASSCODE)");
   if (!r.push) throw new ApiError(400, "Notifications weren't allowed, or this browser can't receive them");
   return alerts.pushStatus();
 });
