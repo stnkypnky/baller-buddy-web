@@ -1,10 +1,9 @@
-/** Cron Worker: every minute, checks ESPN's scoreboard and sends Web Push
+/** The alerts cron: every minute, checks ESPN's scoreboard and sends Web Push
  *  alerts (tip-off, close game, final, upset) to subscribed devices, using the
- *  same rules as the in-app engine (shared/alertsCore.ts). Shares the PUSH KV
- *  namespace with the Pages project. */
+ *  same rules as the in-app engine (shared/alertsCore.ts). */
 
 import { processGames, inQuietHours, type Game, type GameState } from "../shared/alertsCore";
-import { loadSubs, saveSubs, sendPush, type PushEnv } from "../functions/_shared/push";
+import { loadSubs, saveSubs, sendPush, type PushEnv } from "./lib/push";
 
 const SCOREBOARD = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard";
 
@@ -94,9 +93,3 @@ export async function runOnce(env: PushEnv, now = new Date()) {
   if (gone) await saveSubs(env, subs);
   return { alerts: alerts.length, sent };
 }
-
-export default {
-  async scheduled(_ev: ScheduledController, env: PushEnv, ctx: ExecutionContext) {
-    ctx.waitUntil(runOnce(env).then((r) => r.alerts && console.log("alerts", r), (e) => console.warn("alert run failed:", e)));
-  },
-} satisfies ExportedHandler<PushEnv>;

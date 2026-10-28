@@ -22,11 +22,12 @@ web/                  The app (React 19, Vite, Tailwind v4, motion, TanStack Que
     llm/              providers, encrypted keys, tools, OpenAI-compatible + Claude adapters, router
     news.ts pulse.ts alerts.ts music.ts cache.ts (IndexedDB) settings.ts
   src/sw.ts           service worker: offline app shell, image cache, push notifications
-functions/            Cloudflare Pages Functions
-  api/proxy.ts        GET proxy for nba.com / ESPN / RSS / search (allowlisted hosts only)
-  api/ai-relay.ts     pass-through for AI APIs that block browser requests
-  api/push/*          Web Push: VAPID key, subscribe, unsubscribe, test
-worker-cron/          Cloudflare Worker on a 1-minute cron: live-game alerts → Web Push
+worker/               The Cloudflare Worker: serves the app and runs the cron
+  index.ts            routes /api/* (everything else is the built app), plus the cron
+  alerts.ts           1-minute cron: live-game alerts -> Web Push
+  lib/proxy.ts        GET proxy for nba.com / ESPN / RSS / search (allowlisted hosts only)
+  lib/relay.ts        pass-through for AI APIs that block browser requests
+  lib/push*.ts        Web Push: VAPID key, subscribe, unsubscribe, test
 shared/alertsCore.ts  alert rules used by both the app and the cron
 tests/                Vitest (ported from the desktop's pytest suite), offline
 ```
@@ -51,7 +52,7 @@ npm run dev          # http://localhost:5173 (the dev server also serves the pro
 npm test             # offline tests
 npm run typecheck
 npm run build        # → dist/
-npm run preview      # dist/ + functions/ under wrangler, as Cloudflare runs it
+npm run preview      # the Worker + dist/ locally under wrangler (cron: curl localhost:8787/cdn-cgi/handler/scheduled)
 npm run shots        # screenshots of every page, desktop + phone, with sample data
 ```
 
@@ -66,30 +67,30 @@ page); enter it on the provider's card in Settings.
 
 ## Deploy (Cloudflare, free plan)
 
-One-time setup, about 15 minutes.
+One Worker serves the app, the API routes and the alerts cron. One-time setup,
+about 15 minutes.
 
-1. **Pages project.** Cloudflare dashboard → Workers & Pages → Create → Pages →
-   Connect to Git → pick `stnkypnky/baller-buddy-web`.
-   Build command `npm run build`, output directory `dist`. Deploy.
-   You get `https://baller-buddy.pages.dev` (or similar).
-2. **KV namespace** for push subscriptions: Workers & Pages → KV → Create
-   `baller-buddy-push`. In the Pages project → Settings → Bindings, add a KV
-   binding named `PUSH` pointing to it. Put its id into `wrangler.toml` and
-   `worker-cron/wrangler.toml` (`REPLACE_WITH_KV_NAMESPACE_ID`).
-3. **VAPID keys** for Web Push: run `node scripts/vapid-keys.mjs`. In the Pages
-   project → Settings → Variables and secrets, add `VAPID_PUBLIC_KEY`,
-   `VAPID_PRIVATE_KEY` (as a secret) and `VAPID_SUBJECT` = `mailto:you@example.com`.
-   Redeploy so the functions pick them up.
-4. **Alerts cron.** `npx wrangler login`, then
-   `npx wrangler secret put VAPID_PUBLIC_KEY -c worker-cron/wrangler.toml`
-   (and the same for `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT`), then `npm run deploy:cron`.
-5. **Lock it to you.** Zero Trust → Access → Applications → Add → Self-hosted:
-   the Pages domain (and `*.baller-buddy.pages.dev` for previews), policy
-   *Allow* → *Emails* → your address. Sign-in is a one-time code by email.
-   The cron runs inside Cloudflare, so Access doesn't affect it.
+1. **Create the Worker from GitHub.** dash.cloudflare.com → Workers & Pages →
+   Create application → connect `stnkypnky/baller-buddy-web`. Build command
+   `npm run build`, deploy command `npx wrangler deploy` (the defaults are fine).
+   Turn **Protect with Cloudflare Access** on (step 4 explains it). Deploy; you get
+   `https://baller-buddy-<you>.workers.dev`.
+2. **KV namespace** for push subscriptions: Storage & Databases → KV → Create
+   `baller-buddy-push`, copy its id into `wrangler.jsonc` (replacing
+   `REPLACE_WITH_KV_NAMESPACE_ID`), commit and push. The next build deploys with it.
+3. **Push keys.** Run `node scripts/vapid-keys.mjs`. In the Worker → Settings →
+   Variables and Secrets (the runtime ones, not Build) add `VAPID_PUBLIC_KEY`
+   (text), `VAPID_PRIVATE_KEY` (secret) and `VAPID_SUBJECT` (text,
+   `mailto:you@example.com`).
+4. **Lock it to you.** Zero Trust → Access → Applications: the Worker's
+   application (created by the toggle in step 1) → Policies → Allow → Emails →
+   your address. Sign-in is a one-time code by email. The cron runs inside
+   Cloudflare, so Access doesn't affect it. If the browser offers no "Install"
+   afterwards, add a *Bypass* policy for `/manifest.webmanifest`, `/icon-*.png`
+   and `/sw.js`.
 
 After that, every push to `main` deploys; CI (GitHub Actions) runs the
-typecheck, tests and build.
+typecheck, tests and build. The cron shows under the Worker → Settings → Triggers.
 
 ## Install on each device
 

@@ -2,11 +2,11 @@ import { defineConfig, type Connect, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { VitePWA } from "vite-plugin-pwa";
-import { handleProxy } from "./functions/_shared/proxy";
-import { handleRelay } from "./functions/_shared/relay";
+import { handleProxy } from "./worker/lib/proxy";
+import { handleRelay } from "./worker/lib/relay";
 
-/** The data proxy and AI relay, served by the dev server the way the Pages
- *  Functions serve them in production, so `npm run dev` needs no Cloudflare
+/** The data proxy and AI relay, served by the dev server the way the Worker
+ *  serves them in production, so `npm run dev` needs no Cloudflare
  *  tooling. (Push needs `npm run preview`.) */
 function devProxy(): Plugin {
   const mount = (handler: (r: Request) => Promise<Response>): Connect.NextHandleFunction => async (req, res) => {
@@ -37,7 +37,7 @@ function devProxy(): Plugin {
   };
 }
 
-// The app lives in web/. Cloudflare Pages serves dist/ plus functions/.
+// The app lives in web/. The Cloudflare Worker (worker/) serves dist/ plus the /api routes.
 export default defineConfig({
   root: "web",
   base: "/",
