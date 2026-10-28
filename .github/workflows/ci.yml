@@ -1,5 +1,5 @@
 # Typecheck, tests and a production build on every push and pull request.
-# Cloudflare Pages builds and deploys `main` itself (see README → Deploy).
+# Cloudflare builds and deploys `main` itself (see README → Deploy).
 name: CI
 
 on:
