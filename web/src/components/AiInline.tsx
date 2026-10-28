@@ -1,6 +1,7 @@
 import { Sparkles, Square, Volume2, VolumeX } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAiOneShot, type ChatRequest } from "../lib/ai";
+import { announce } from "../lib/announcer";
 import { useSelection } from "../lib/queries";
 import { AssistantBody, ModelPicker } from "./AiParts";
 import { Button, Panel, SectionTitle } from "./ui";
@@ -34,31 +35,23 @@ export function AiInline({
   const [speaking, setSpeaking] = useState(false);
   const busy = !!turn?.streaming;
 
-  useEffect(() => () => window.speechSynthesis?.cancel(), []);
-  useEffect(() => {
-    window.speechSynthesis?.cancel();
+  const stopSpeech = useRef<(() => void) | null>(null);
+  const hush = () => {
+    stopSpeech.current?.();
+    stopSpeech.current = null;
     setSpeaking(false);
-  }, [resetKey]);
+  };
+
+  useEffect(() => () => stopSpeech.current?.(), []);
+  useEffect(hush, [resetKey]);
 
   function speak() {
-    const synth = window.speechSynthesis;
-    if (!synth || !turn?.content) return;
-    if (speaking) {
-      synth.cancel();
+    if (!turn?.content) return;
+    if (speaking) return hush();
+    stopSpeech.current = announce(turn.content, () => {
+      stopSpeech.current = null;
       setSpeaking(false);
-      return;
-    }
-    const u = new SpeechSynthesisUtterance(turn.content.replace(/[*_#`>]/g, ""));
-    const voices = synth.getVoices();
-    u.voice =
-      voices.find((v) => /en-US/i.test(v.lang) && /(Guy|Davis|Andrew|Christopher|Natural)/i.test(v.name)) ??
-      voices.find((v) => /en-US/i.test(v.lang)) ??
-      null;
-    u.rate = 1.08;
-    u.pitch = 1;
-    u.onend = () => setSpeaking(false);
-    u.onerror = () => setSpeaking(false);
-    synth.speak(u);
+    });
     setSpeaking(true);
   }
 
@@ -85,8 +78,7 @@ export function AiInline({
                 size="sm"
                 disabled={disabled}
                 onClick={() => {
-                  window.speechSynthesis?.cancel();
-                  setSpeaking(false);
+                  hush();
                   run({ mode, focus, context, event_id: eventId, team_id: sel.team?.id, season: sel.season });
                 }}
               >

@@ -188,3 +188,23 @@ describe("scope", () => {
     expect(messages[0].content).toBe("write me a poem");
   });
 });
+
+describe("announcer", () => {
+  it("reads line by line, faster and higher on the big plays", async () => {
+    const { lines } = await import("../web/src/lib/announcer");
+    const out = lines("**Celtics** lead it 110-100. Tatum from downtown! What a finish.");
+    expect(out.map((l) => l.text)).toEqual(["Celtics lead it 110 to 100.", "Tatum from downtown!", "What a finish."]);
+    expect(out[1]).toMatchObject({ big: true });
+    expect(out[1].rate).toBeGreaterThan(out[2].rate);
+    expect(out[1].pitch).toBeGreaterThan(out[2].pitch);
+    expect(out[0].rate).toBeLessThan(out[2].rate);
+  });
+
+  it("prefers natural voices, then announcer-ish ones", async () => {
+    const { pickVoice } = await import("../web/src/lib/announcer");
+    const v = (name: string, lang = "en-US") => ({ name, lang }) as SpeechSynthesisVoice;
+    expect(pickVoice([v("Samantha"), v("Microsoft Guy Online (Natural) - English (United States)"), v("Thomas", "fr-FR")])?.name).toContain("Guy");
+    expect(pickVoice([v("Samantha"), v("Daniel")])?.name).toBe("Daniel");
+    expect(pickVoice([v("Amélie", "fr-CA"), v("Karen", "en-AU")])?.name).toBe("Karen");
+  });
+});

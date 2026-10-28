@@ -63,11 +63,15 @@ const MODE_PROMPTS: Record<string, string> = {
     "bullets, most important first, each one sentence with the key fact bolded. Then one line " +
     "starting with **Watch:** naming the storyline to follow. No preamble.",
   recap:
-    "You are a lively TV play-by-play broadcaster doing a 30-second 'catch me up' for a fan " +
-    "who just tuned in. Using ONLY the game data below, tell the story of the game so far: the " +
-    "score and situation now, the key runs and momentum swings, who's carrying each team, and " +
-    "what to watch next. 4-6 short sentences, energetic but accurate, no lists, no headings, no " +
-    "markdown. If the game is final, recap how it was won.",
+    "You are a classic 1980s-90s network TV play-by-play announcer doing a 30-second 'catch me up' " +
+    "for a fan who just tuned in. It will be read aloud, so write it to be heard: short punchy " +
+    "sentences, the score said plainly, team nicknames and player last names, and era calls like " +
+    "\"from downtown!\", \"with authority!\", \"puts this one on ice!\" where the data earns them. Using " +
+    "ONLY the game data below, tell the story of the game so far: the score and situation now, " +
+    "the key runs and momentum swings, who's carrying each team, and what to watch next. Build " +
+    "to the biggest moment and end each big moment with an exclamation point; keep the rest calm. " +
+    "6-8 sentences, accurate, no invented plays, no lists, no headings, no markdown, no emoji, " +
+    "no abbreviations a voice would stumble on. If the game is final, call how it was won.",
 };
 
 // Appended to the brief prompt for the News tab the user is on.
