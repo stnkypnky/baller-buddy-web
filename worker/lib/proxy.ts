@@ -33,6 +33,9 @@ const RULES: Record<string, HostRule> = {
   "cdn.nba.com": { headers: { "User-Agent": BROWSER_UA, Referer: "https://www.nba.com/" }, edgeTtl: 86400 },
   "ak-static.cms.nba.com": { headers: { "User-Agent": BROWSER_UA, Referer: "https://www.nba.com/" }, edgeTtl: 86400 },
   "site.api.espn.com": { headers: { "User-Agent": BROWSER_UA }, edgeTtl: 0 },
+  // ESPN's other API host: the scoreboard fallback when one day's answer from
+  // site.api is broken.
+  "site.web.api.espn.com": { headers: { "User-Agent": BROWSER_UA }, edgeTtl: 0 },
   "a.espncdn.com": { headers: { "User-Agent": BROWSER_UA }, edgeTtl: 86400 },
   "www.espn.com": { headers: { "User-Agent": BROWSER_UA }, edgeTtl: 600 },
   "www.cbssports.com": { headers: { "User-Agent": BROWSER_UA }, edgeTtl: 600 },
@@ -67,7 +70,7 @@ const easternYmd = (d: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: "Am
  *  so every device shares one request per date: a few seconds for a day that
  *  may still be playing, a day for one that's long over. */
 export function edgeTtl(target: URL, rule: HostRule, now = new Date()): number {
-  if (target.hostname === "site.api.espn.com" && target.pathname.endsWith("/scoreboard")) {
+  if (target.hostname.endsWith(".espn.com") && target.pathname.endsWith("/scoreboard")) {
     const day = target.searchParams.get("dates") ?? "";
     // 30 hours back: late West-coast games of "yesterday" are over by then.
     return /^\d{8}$/.test(day) && day <= easternYmd(new Date(now.getTime() - 30 * 3600_000)) ? 86400 : 15;

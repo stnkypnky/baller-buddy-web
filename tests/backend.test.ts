@@ -435,12 +435,21 @@ describe("shared scoreboard", () => {
     let n = 0;
     const calls = serve([["scoreboard", () => (n++ ? board("post") : new Response("", { status: 200 }))]]);
     expect((await data.fetchScoreboard("20200102")).games).toHaveLength(1);
-    expect(calls).toHaveLength(2);
+    expect(calls[1]).toContain("limit=200");
   });
 
-  it("says what was wrong when it stays empty", async () => {
+  it("tries another form, then ESPN's other host, when one day stays broken", async () => {
+    const calls = serve([
+      ["site.web.api.espn.com", board("post")],
+      ["scoreboard", () => new Response('{"events":[{"id":"1","na', { status: 200 })],
+    ]);
+    expect((await data.fetchScoreboard("20200104")).games).toHaveLength(1);
+    expect(calls.map((u) => new URL(u).host + (u.includes("limit=200") ? " +limit" : ""))).toEqual(["site.api.espn.com", "site.api.espn.com +limit", "site.web.api.espn.com"]);
+  });
+
+  it("says what was wrong when every form is broken", async () => {
     const calls = serve([["scoreboard", () => new Response("", { status: 200 })]]);
     await expect(data.fetchScoreboard("20200103")).rejects.toThrow("empty response from site.api.espn.com");
-    expect(calls).toHaveLength(2);
+    expect(calls).toHaveLength(3);
   });
 });

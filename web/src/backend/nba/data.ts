@@ -18,7 +18,7 @@ import {
   seasonTtl,
   type SeasonType,
 } from "../config";
-import { getJson, getText } from "../http";
+import { getJson, getText, HttpError } from "../http";
 import { columns, dashParams, int, num, numOrNull, resultSet, round, statsGet, str, type Row } from "./stats";
 import { ESPN_ID_TO_NAME, ESPN_IDS, getTeamAbbr, getTeamId, getTeamName } from "./teams";
 
@@ -1093,6 +1093,29 @@ export function clearScoreboards() {
   boardInflight.clear();
 }
 
+/** A day's raw scoreboard. ESPN has served a single date broken (empty or cut
+ *  off) while the days around it were fine, so a broken answer is asked for
+ *  again in other forms: with an extra parameter (a different cached copy at
+ *  ESPN), then from ESPN's other API host. */
+async function boardJson(day: string) {
+  const tries: [string, Record<string, string>][] = [
+    [ESPN_SCOREBOARD_URL, { dates: day }],
+    [ESPN_SCOREBOARD_URL, { dates: day, limit: "200" }],
+    [ESPN_SCOREBOARD_URL.replace("//site.api.", "//site.web.api."), { dates: day }],
+  ];
+  let first: unknown;
+  for (const [url, params] of tries) {
+    try {
+      return await getJson(url, { params, timeout: 15 });
+    } catch (e) {
+      first ??= e;
+      // only a broken answer is worth another form; a timeout or a refusal isn't
+      if (!(e instanceof HttpError && e.status === 502)) throw e;
+    }
+  }
+  throw first;
+}
+
 /** Today's (or `date` YYYYMMDD) NBA slate from ESPN. */
 export function fetchScoreboard(date?: string | null): Promise<Scoreboard> {
   const day = date || nbaToday();
@@ -1110,7 +1133,7 @@ export function fetchScoreboard(date?: string | null): Promise<Scoreboard> {
         return kept;
       }
     }
-    const sb = parseScoreboard(await getJson(ESPN_SCOREBOARD_URL, { params: { dates: day }, timeout: 15, retries: 1 }));
+    const sb = parseScoreboard(await boardJson(day));
     const done = past && sb.games.length > 0 && sb.games.every((g) => g.state === "post");
     boardMemo.set(day, sb, done ? BOARD_DONE_TTL : sb.games.some((g) => g.state === "in") ? BOARD_LIVE_TTL : BOARD_TTL);
     if (done) await appCache.set(key, sb).catch(() => {});
