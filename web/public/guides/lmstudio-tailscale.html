@@ -1,0 +1,469 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>LM Studio on Your Phone</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --surface-2: #f0f2f5;
+  --border: #e2e5ea;
+  --text: #12161d;
+  --muted: #5b6472;
+  --accent: #e8590c;
+  --accent-soft: #fff1e8;
+  --accent-text: #b8460a;
+  --pc: #2563eb;
+  --pc-soft: #e8efff;
+  --phone: #0d9488;
+  --phone-soft: #e1f6f3;
+  --ok: #16a34a;
+  --ok-soft: #e5f6eb;
+  --warn-soft: #fff7e0;
+  --warn-border: #f2d27a;
+  --code-bg: #0f141b;
+  --code-text: #e6edf3;
+  --shadow: 0 1px 2px rgba(16,24,40,.05), 0 4px 16px rgba(16,24,40,.06);
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #07090d;
+    --surface: #10141b;
+    --surface-2: #161b24;
+    --border: #232a36;
+    --text: #e9edf3;
+    --muted: #97a1b0;
+    --accent: #ff7a2f;
+    --accent-soft: #2a1709;
+    --accent-text: #ffa36b;
+    --pc: #6b9bff;
+    --pc-soft: #121d36;
+    --phone: #2dd4bf;
+    --phone-soft: #0b2622;
+    --ok: #34d399;
+    --ok-soft: #0c2a1e;
+    --warn-soft: #2a2208;
+    --warn-border: #6b5410;
+    --code-bg: #05070a;
+    --code-text: #e6edf3;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 6px 20px rgba(0,0,0,.35);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #07090d;
+  --surface: #10141b;
+  --surface-2: #161b24;
+  --border: #232a36;
+  --text: #e9edf3;
+  --muted: #97a1b0;
+  --accent: #ff7a2f;
+  --accent-soft: #2a1709;
+  --accent-text: #ffa36b;
+  --pc: #6b9bff;
+  --pc-soft: #121d36;
+  --phone: #2dd4bf;
+  --phone-soft: #0b2622;
+  --ok: #34d399;
+  --ok-soft: #0c2a1e;
+  --warn-soft: #2a2208;
+  --warn-border: #6b5410;
+  --code-bg: #05070a;
+  --code-text: #e6edf3;
+  --shadow: 0 1px 2px rgba(0,0,0,.4), 0 6px 20px rgba(0,0,0,.35);
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 16px/1.6 Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.wrap { max-width: 760px; margin: 0 auto; padding: 40px 0 64px; }
+a { color: var(--accent-text); text-underline-offset: 2px; }
+code, .mono { font-family: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace; font-size: .9em; }
+:not(pre) > code { background: var(--surface-2); border: 1px solid var(--border); padding: 1px 6px; border-radius: 6px; overflow-wrap: anywhere; }
+strong { font-weight: 650; }
+
+/* Hero */
+.eyebrow { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--accent-text); background: var(--accent-soft); padding: 4px 10px; border-radius: 999px; }
+h1 { font-size: clamp(30px, 6vw, 42px); line-height: 1.12; letter-spacing: -.02em; margin: 14px 0 12px; font-weight: 800; }
+.lede { font-size: 18px; color: var(--muted); margin: 0 0 24px; max-width: 60ch; }
+
+.flow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 14px 16px; box-shadow: var(--shadow); margin-bottom: 20px; }
+.node { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 14px; padding: 6px 10px; border-radius: 10px; background: var(--surface-2); }
+.node svg { width: 18px; height: 18px; flex: none; }
+.arrow { color: var(--muted); font-size: 13px; display: flex; align-items: center; gap: 6px; }
+.arrow::before { content: ""; width: 22px; height: 2px; background: var(--border); border-radius: 2px; }
+
+.needs { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; margin: 0 0 12px; padding: 0; list-style: none; }
+.needs li { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; font-size: 14px; color: var(--muted); }
+.needs b { display: block; color: var(--text); font-size: 15px; }
+
+/* Progress */
+.progress { position: sticky; top: 0; z-index: 5; background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); padding: 12px 0; margin: 28px 0 8px; display: flex; align-items: center; gap: 12px; }
+.bar { flex: 1; height: 8px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 99px; overflow: hidden; }
+.bar > i { display: block; height: 100%; width: 0; background: var(--accent); border-radius: 99px; transition: width .3s ease; }
+.progress span { font-size: 13px; font-weight: 600; color: var(--muted); white-space: nowrap; min-width: 92px; text-align: right; }
+
+/* Steps */
+ol.steps { list-style: none; margin: 0; padding: 0; counter-reset: s; }
+.step { position: relative; padding-left: 56px; padding-bottom: 28px; }
+.step::before { counter-increment: s; content: counter(s); position: absolute; left: 0; top: 2px; width: 38px; height: 38px; border-radius: 50%; display: grid; place-items: center; font-weight: 800; background: var(--surface); border: 2px solid var(--border); color: var(--text); transition: all .2s; }
+.step::after { content: ""; position: absolute; left: 18px; top: 46px; bottom: 4px; width: 2px; background: var(--border); }
+.step:last-child::after { display: none; }
+.step.done::before { content: "✓"; background: var(--ok); border-color: var(--ok); color: #fff; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 20px; box-shadow: var(--shadow); }
+.step-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.step h2 { font-size: 20px; line-height: 1.3; margin: 0; letter-spacing: -.01em; }
+.tag { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; padding: 3px 9px; border-radius: 999px; white-space: nowrap; }
+.tag svg { width: 14px; height: 14px; }
+.tag.pc { color: var(--pc); background: var(--pc-soft); }
+.tag.phone { color: var(--phone); background: var(--phone-soft); }
+.step p { margin: 10px 0; }
+.step ul.do { margin: 12px 0 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+.step ul.do li { position: relative; padding-left: 26px; }
+.step ul.do li::before { content: ""; position: absolute; left: 4px; top: .62em; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+.path { font-weight: 600; }
+.path .sep { color: var(--muted); font-weight: 400; margin: 0 4px; }
+
+.done-toggle { display: inline-flex; align-items: center; gap: 8px; margin-top: 16px; font-size: 14px; font-weight: 600; color: var(--muted); cursor: pointer; user-select: none; padding: 8px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); }
+.done-toggle input { width: 18px; height: 18px; accent-color: var(--ok); margin: 0; }
+.step.done .done-toggle { color: var(--ok); background: var(--ok-soft); border-color: transparent; }
+
+/* Code */
+.code { position: relative; display: flex; align-items: stretch; background: var(--code-bg); border-radius: 12px; margin: 12px 0; border: 1px solid var(--border); overflow: hidden; }
+.code pre { margin: 0; padding: 14px 16px; color: var(--code-text); font: 15px/1.5 "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace; flex: 1; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.code pre .p { color: #7d8896; user-select: none; }
+.copy { flex: none; border: 0; border-left: 1px solid rgba(255,255,255,.08); background: rgba(255,255,255,.04); color: #cfd6df; font: 600 13px Inter, sans-serif; padding: 0 16px; cursor: pointer; min-width: 84px; min-height: 48px; }
+.copy:hover { background: rgba(255,255,255,.1); }
+.copy.ok { color: #34d399; }
+
+.note { border-radius: 12px; padding: 12px 14px; font-size: 15px; margin: 12px 0 0; display: flex; gap: 10px; }
+.note svg { width: 20px; height: 20px; flex: none; margin-top: 2px; }
+.note.tip { background: var(--accent-soft); }
+.note.tip svg { color: var(--accent-text); }
+.note.warn { background: var(--warn-soft); border: 1px solid var(--warn-border); }
+.note p { margin: 0; }
+.note p + p { margin-top: 6px; }
+
+.example { font-size: 14px; color: var(--muted); }
+.example code { color: var(--text); }
+
+/* Builder */
+.builder { margin-top: 14px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px; padding: 14px; }
+.builder label { display: block; font-size: 14px; font-weight: 600; margin-bottom: 8px; }
+.builder input[type=text] { width: 100%; font: 15px "JetBrains Mono", monospace; padding: 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface); color: var(--text); outline: none; }
+.builder input[type=text]:focus { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent); }
+.builder .result { margin-top: 10px; }
+.builder .hint { font-size: 13px; color: var(--muted); margin-top: 6px; min-height: 1.2em; }
+.builder .hint.bad { color: #dc2626; }
+
+/* Sections */
+h3.sec { font-size: 22px; letter-spacing: -.01em; margin: 40px 0 14px; }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.mini { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 16px; }
+.mini h4 { margin: 0 0 6px; font-size: 16px; }
+.mini p { margin: 0; color: var(--muted); font-size: 15px; }
+.checks { list-style: none; padding: 0; margin: 8px 0 0; display: grid; gap: 4px; font-size: 15px; }
+.checks li::before { content: "✓"; color: var(--ok); font-weight: 800; margin-right: 8px; }
+
+details { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; margin-bottom: 8px; overflow: hidden; }
+summary { cursor: pointer; padding: 14px 16px; font-weight: 600; list-style: none; display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+summary::-webkit-details-marker { display: none; }
+summary::after { content: "+"; font-size: 22px; line-height: 1; color: var(--muted); transition: transform .2s; flex: none; }
+details[open] summary::after { transform: rotate(45deg); }
+details .body { padding: 0 16px 14px; color: var(--muted); }
+details .body p { margin: 0 0 8px; }
+details .body strong { color: var(--text); }
+
+.why { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 20px; }
+.why p { margin: 0 0 12px; color: var(--muted); }
+.why p:last-child { margin: 0; }
+.why strong { color: var(--text); }
+
+.cta { display: inline-flex; align-items: center; gap: 8px; margin-top: 8px; background: var(--accent); color: #fff; text-decoration: none; font-weight: 700; padding: 12px 18px; border-radius: 12px; }
+.cta:hover { filter: brightness(1.05); }
+footer { margin-top: 40px; color: var(--muted); font-size: 14px; text-align: center; }
+
+@media (max-width: 520px) {
+  .wrap { padding-top: 24px; }
+  .step { padding-left: 46px; }
+  .step::before { width: 32px; height: 32px; font-size: 14px; }
+  .step::after { left: 15px; top: 40px; }
+  .card { padding: 16px; }
+  .lede { font-size: 17px; }
+  .arrow::before { width: 12px; }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-pc" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></symbol>
+  <symbol id="i-phone" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="2" width="12" height="20" rx="2.5"/><path d="M11 18h2"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></symbol>
+  <symbol id="i-bulb" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.3 1 2.1V17h6v-.2c0-.8.4-1.6 1-2.1A7 7 0 0 0 12 2z"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></symbol>
+  <symbol id="i-ball" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2v20M5 5c3 3 3 11 0 14M19 5c-3 3-3 11 0 14"/></symbol>
+</svg>
+
+<div class="wrap">
+  <header>
+    <span class="eyebrow">Baller Buddy · Setup guide</span>
+    <h1>Use LM Studio on your phone</h1>
+    <p class="lede">Your PC runs the AI model. Tailscale gives it a private, secure <strong>https</strong> address that only your devices can reach, at home or away. Baller Buddy on your phone talks to that address.</p>
+
+    <div class="flow" aria-label="How it connects">
+      <span class="node"><svg><use href="#i-phone"/></svg>Baller Buddy</span>
+      <span class="arrow">https</span>
+      <span class="node"><svg><use href="#i-lock"/></svg>Tailscale</span>
+      <span class="arrow">private</span>
+      <span class="node"><svg><use href="#i-pc"/></svg>LM Studio</span>
+    </div>
+
+    <ul class="needs">
+      <li><b>Your PC</b>with LM Studio installed</li>
+      <li><b>Your phone</b>with Baller Buddy</li>
+      <li><b>About 10 minutes</b>one-time setup</li>
+      <li><b>Free Tailscale account</b>sign in with Google, Microsoft or Apple</li>
+    </ul>
+  </header>
+
+  <div class="progress" aria-live="polite">
+    <div class="bar"><i id="bar"></i></div>
+    <span id="count">0 of 5 done</span>
+  </div>
+
+  <ol class="steps">
+    <!-- 1 -->
+    <li class="step" data-step="1">
+      <div class="card">
+        <div class="step-head">
+          <h2>Get LM Studio ready</h2>
+          <span class="tag pc"><svg><use href="#i-pc"/></svg>On the PC</span>
+        </div>
+        <p>Open LM Studio and go to the <strong>Developer</strong> tab (the <code>&gt;_</code> icon on the left).</p>
+        <ul class="do">
+          <li>Click <span class="path">Server Settings</span> and turn on <strong>Enable CORS</strong>. This lets a web app talk to it.</li>
+          <li>Make sure the status switch at the top says <strong>Running</strong>.</li>
+          <li>Load a model: click <strong>Select a model to load</strong> at the top and pick one. Your screenshot showed none loaded, and nothing answers without one.</li>
+        </ul>
+        <div class="note tip"><svg><use href="#i-bulb"/></svg><p>Leave the port at <code>1234</code>. The rest of this guide assumes it.</p></div>
+        <label class="done-toggle"><input type="checkbox"> I've done this</label>
+      </div>
+    </li>
+
+    <!-- 2 -->
+    <li class="step" data-step="2">
+      <div class="card">
+        <div class="step-head">
+          <h2>Install Tailscale on the PC</h2>
+          <span class="tag pc"><svg><use href="#i-pc"/></svg>On the PC</span>
+        </div>
+        <ul class="do">
+          <li>Go to <a href="https://tailscale.com/download" target="_blank" rel="noopener">tailscale.com/download</a> and download the Windows version.</li>
+          <li>Install it, then click <strong>Log in</strong> and create your free account (Google, Microsoft or Apple sign-in is easiest).</li>
+          <li>A Tailscale icon appears in the system tray, near the clock. That means it's on.</li>
+        </ul>
+        <label class="done-toggle"><input type="checkbox"> I've done this</label>
+      </div>
+    </li>
+
+    <!-- 3 -->
+    <li class="step" data-step="3">
+      <div class="card">
+        <div class="step-head">
+          <h2>Install Tailscale on the phone</h2>
+          <span class="tag phone"><svg><use href="#i-phone"/></svg>On the phone</span>
+        </div>
+        <ul class="do">
+          <li>Get <strong>Tailscale</strong> from the Play Store (Android) or App Store (iPhone/iPad).</li>
+          <li>Sign in with the <strong>same account</strong> you used on the PC.</li>
+          <li>Turn it on. When the phone asks to allow a VPN connection, tap <strong>Allow / OK</strong>.</li>
+        </ul>
+        <p class="example">In the Tailscale app you should now see your PC listed as a device.</p>
+        <div class="note tip"><svg><use href="#i-bulb"/></svg><p>Tailscale only routes traffic to your own devices, so your normal browsing and apps are unaffected.</p></div>
+        <label class="done-toggle"><input type="checkbox"> I've done this</label>
+      </div>
+    </li>
+
+    <!-- 4 -->
+    <li class="step" data-step="4">
+      <div class="card">
+        <div class="step-head">
+          <h2>Give LM Studio an https address</h2>
+          <span class="tag pc"><svg><use href="#i-pc"/></svg>On the PC</span>
+        </div>
+        <p>Press <strong>Start</strong>, type <strong>cmd</strong>, and open <strong>Command Prompt</strong> (PowerShell works too). Paste this and press Enter:</p>
+        <div class="code"><pre><span class="p">&gt; </span><span data-copy>tailscale serve --bg 1234</span></pre><button class="copy" type="button">Copy</button></div>
+
+        <div class="note warn"><svg><use href="#i-alert"/></svg><div><p><strong>If it prints a link</strong> saying Serve or HTTPS isn't enabled: open that link, click <strong>Enable</strong>, then run the same command again.</p></div></div>
+
+        <p>When it works it prints an address like this. <strong>Copy it</strong>; you'll need it next.</p>
+        <div class="code"><pre><span>https://my-pc.tail1234.ts.net</span></pre></div>
+        <p class="example"><code>--bg</code> keeps it running in the background, even after you close the window or restart the PC. You only do this once.</p>
+        <label class="done-toggle"><input type="checkbox"> I've done this</label>
+      </div>
+    </li>
+
+    <!-- 5 -->
+    <li class="step" data-step="5">
+      <div class="card">
+        <div class="step-head">
+          <h2>Point Baller Buddy at it</h2>
+          <span class="tag phone"><svg><use href="#i-phone"/></svg>On the phone</span>
+        </div>
+        <p>Paste the address from step 4 here to get the exact one to enter:</p>
+        <div class="builder">
+          <label for="addr">Your Tailscale address</label>
+          <input id="addr" type="text" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="https://my-pc.tail1234.ts.net">
+          <div class="hint" id="hint">Paste it above and the address to use appears below.</div>
+          <div class="code result"><pre><span data-copy id="out">https://my-pc.tail1234.ts.net/v1</span></pre><button class="copy" type="button">Copy</button></div>
+        </div>
+        <ul class="do">
+          <li>In Baller Buddy open <span class="path">Settings<span class="sep">›</span>AI Providers</span> and find the <strong>LM Studio</strong> card (not Custom).</li>
+          <li>Replace the address with the one above, ending in <code>/v1</code>. It saves when you tap away from the box.</li>
+          <li>Tap <strong>Test</strong>. If Chrome asks to let the site access devices on your local network, tap <strong>Allow</strong>.</li>
+          <li>Set LM Studio as your default model, then ask the <strong>AI Analyst</strong> something.</li>
+        </ul>
+        <p><a class="cta" href="https://baller-buddy-web.sc8r91.workers.dev/#/settings" target="_blank" rel="noopener"><svg width="18" height="18"><use href="#i-ball"/></svg>Open Baller Buddy</a></p>
+        <label class="done-toggle"><input type="checkbox"> I've done this</label>
+      </div>
+    </li>
+  </ol>
+
+  <h3 class="sec">Every day after this</h3>
+  <div class="grid2">
+    <div class="mini">
+      <h4>It works anywhere</h4>
+      <p>Home Wi-Fi, mobile data, a friend's place. As long as:</p>
+      <ul class="checks">
+        <li>The PC is on and awake</li>
+        <li>LM Studio is running with a model loaded</li>
+        <li>Tailscale is on on the phone</li>
+      </ul>
+    </div>
+    <div class="mini">
+      <h4>On the PC itself</h4>
+      <p>Using Baller Buddy in the PC's browser? You don't need Tailscale there. The default address works:</p>
+      <div class="code"><pre><span data-copy>http://localhost:1234/v1</span></pre><button class="copy" type="button">Copy</button></div>
+    </div>
+  </div>
+
+  <h3 class="sec">If the Test fails</h3>
+  <details>
+    <summary>"Failed to fetch" or "Network error"</summary>
+    <div class="body">
+      <p>Usually <strong>CORS is off</strong> in LM Studio. Check Developer › Server Settings › Enable CORS (step 1).</p>
+      <p>Also check <strong>Tailscale is on</strong> on the phone. The Tailscale app should say Connected.</p>
+    </div>
+  </details>
+  <details>
+    <summary>It connects but there's no answer, or "no model"</summary>
+    <div class="body"><p><strong>No model is loaded.</strong> In LM Studio pick one from "Select a model to load" at the top. Models unload when LM Studio closes.</p></div>
+  </details>
+  <details>
+    <summary>404 or "Not found"</summary>
+    <div class="body"><p>The address should end in exactly <strong>/v1</strong>: not missing, and not <code>/v1/v1</code>. Use the builder in step 5.</p></div>
+  </details>
+  <details>
+    <summary>The address doesn't load at all</summary>
+    <div class="body">
+      <p>Check that serve is still on. On the PC run:</p>
+      <div class="code"><pre><span class="p">&gt; </span><span data-copy>tailscale serve status</span></pre><button class="copy" type="button">Copy</button></div>
+      <p>If it shows nothing, run <code>tailscale serve --bg 1234</code> again.</p>
+    </div>
+  </details>
+  <details>
+    <summary>It worked yesterday but not today</summary>
+    <div class="body"><p>The PC may be <strong>asleep</strong>. Set Windows' Sleep to "Never" while plugged in (Settings › System › Power), or wake it before using AI from your phone.</p></div>
+  </details>
+
+  <h3 class="sec">Why is this needed?</h3>
+  <div class="why">
+    <p>Baller Buddy is now a web app served over <strong>https</strong> (secure). Browsers block secure pages from calling plain <strong>http</strong> addresses like <code>http://192.168.1.76:1234</code>. This is called <strong>mixed content</strong>, and there's no setting to turn it off.</p>
+    <p>Browsers also ask a server for permission before a web page can talk to it. That's <strong>CORS</strong>, which is why LM Studio needs it switched on.</p>
+    <p>The old Android app was a native app, and these browser rules don't apply to native apps. Tailscale fixes both: a real https address, private to your devices, and it works away from home too.</p>
+  </div>
+
+  <footer>Baller Buddy · <a href="https://baller-buddy-web.sc8r91.workers.dev" target="_blank" rel="noopener">baller-buddy-web.sc8r91.workers.dev</a></footer>
+</div>
+
+<script>
+(function () {
+  var KEY = "bb-lmstudio-guide-done";
+  var steps = Array.prototype.slice.call(document.querySelectorAll(".step"));
+  var saved = [];
+  try { saved = JSON.parse(localStorage.getItem(KEY) || "[]") || []; } catch (e) { saved = []; }
+
+  function render() {
+    var n = 0, list = [];
+    steps.forEach(function (s) {
+      var on = s.querySelector(".done-toggle input").checked;
+      s.classList.toggle("done", on);
+      if (on) { n++; list.push(s.dataset.step); }
+    });
+    document.getElementById("bar").style.width = (n / steps.length * 100) + "%";
+    document.getElementById("count").textContent = n === steps.length ? "All done 🎉" : n + " of " + steps.length + " done";
+    try { localStorage.setItem(KEY, JSON.stringify(list)); } catch (e) {}
+  }
+  steps.forEach(function (s) {
+    var box = s.querySelector(".done-toggle input");
+    box.checked = saved.indexOf(s.dataset.step) !== -1;
+    box.addEventListener("change", render);
+  });
+  render();
+
+  // Copy buttons
+  document.querySelectorAll(".copy").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var el = btn.parentNode.querySelector("[data-copy]");
+      var text = el.textContent;
+      function ok() { btn.textContent = "Copied"; btn.classList.add("ok"); setTimeout(function () { btn.textContent = "Copy"; btn.classList.remove("ok"); }, 1600); }
+      function fallback() {
+        var r = document.createRange(); r.selectNodeContents(el);
+        var sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
+        btn.textContent = "Selected";
+        setTimeout(function () { btn.textContent = "Copy"; }, 1600);
+      }
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(ok, fallback);
+      else fallback();
+    });
+  });
+
+  // Address builder
+  var input = document.getElementById("addr"), out = document.getElementById("out"), hint = document.getElementById("hint");
+  try { input.value = localStorage.getItem("bb-lmstudio-guide-addr") || ""; } catch (e) {}
+  function build() {
+    var v = input.value.trim();
+    try { localStorage.setItem("bb-lmstudio-guide-addr", v); } catch (e) {}
+    hint.classList.remove("bad");
+    if (!v) { out.textContent = "https://my-pc.tail1234.ts.net/v1"; hint.textContent = "Paste it above and the address to use appears below."; return; }
+    v = v.replace(/\s+/g, "");
+    if (!/^[a-z]+:\/\//i.test(v)) v = "https://" + v;
+    v = v.replace(/^http:\/\//i, "https://");
+    v = v.replace(/\/+$/, "").replace(/(\/v1)+$/i, "");
+    v = v.replace(/:1234$/, "");
+    out.textContent = v + "/v1";
+    if (/\.ts\.net$/i.test(v)) hint.textContent = "Looks right. Copy this into the LM Studio card.";
+    else { hint.textContent = "Tailscale addresses end in .ts.net. Double-check you copied the one from step 4."; hint.classList.add("bad"); }
+  }
+  input.addEventListener("input", build);
+  build();
+})();
+</script>
+</body>
+</html>

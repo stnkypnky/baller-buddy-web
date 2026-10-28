@@ -65,7 +65,10 @@ Local AI (LM Studio / Ollama) works from a computer's browser at
 `http://localhost`: in LM Studio turn on **Enable CORS** in the server settings;
 for Ollama set `OLLAMA_ORIGINS=*`. Another device can use a local server only
 through an `https://` address (browsers block plain `http://` from an `https`
-page); enter it on the provider's card in Settings.
+page); enter it on the provider's card in Settings. To use LM Studio on the PC
+from a phone, follow the step-by-step Tailscale guide:
+[`/guides/lmstudio-tailscale.html`](https://baller-buddy-web.sc8r91.workers.dev/guides/lmstudio-tailscale.html)
+(source in `web/public/guides/`).
 
 ## Deploy (Cloudflare, free plan)
 
