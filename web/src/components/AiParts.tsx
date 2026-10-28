@@ -292,15 +292,17 @@ export function ModelPicker() {
         <Popover.Content
           align="end"
           sideOffset={8}
-          className="z-[60] flex h-[420px] w-[600px] overflow-hidden rounded-2xl border border-line bg-[#0d1017]/95 shadow-2xl backdrop-blur-xl data-[state=open]:animate-[pop_.16s_ease-out]"
+          collisionPadding={8}
+          className="z-[60] flex h-[420px] w-[600px] overflow-hidden rounded-2xl border border-line bg-[#0d1017]/95 shadow-2xl backdrop-blur-xl data-[state=open]:animate-[pop_.16s_ease-out] max-sm:h-[min(460px,70vh)] max-sm:w-[calc(100vw-1rem)] max-sm:flex-col"
         >
-          <div className="scroll w-[220px] shrink-0 border-r border-line p-2">
+          {/* Phones: providers become a row of chips above the models. */}
+          <div className="scroll w-[220px] shrink-0 border-r border-line p-2 max-sm:flex max-sm:w-full max-sm:gap-1 max-sm:overflow-x-auto max-sm:border-r-0 max-sm:border-b">
             {providers.map((p) => (
               <button
                 key={p.id}
                 onClick={() => (setPid(p.id), setQ(""))}
                 className={cx(
-                  "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] transition-colors hover:bg-white/[0.06]",
+                  "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] transition-colors hover:bg-white/[0.06] max-sm:w-auto max-sm:shrink-0 max-sm:whitespace-nowrap",
                   browsing === p.id && "bg-white/[0.07]",
                   !p.available && "opacity-55",
                 )}
@@ -312,7 +314,7 @@ export function ModelPicker() {
             ))}
             <button
               onClick={() => (setOpen(false), navigate("/settings"))}
-              className="mt-2 flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs text-muted hover:bg-white/[0.06] hover:text-fg"
+              className="mt-2 flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs text-muted hover:bg-white/[0.06] hover:text-fg max-sm:mt-0 max-sm:w-auto max-sm:shrink-0 max-sm:whitespace-nowrap"
             >
               <Settings2 className="size-3.5" /> Manage providers & keys
             </button>

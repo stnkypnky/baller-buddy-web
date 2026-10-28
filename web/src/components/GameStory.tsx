@@ -1,5 +1,6 @@
 ﻿import { MapPin, UsersRound, Whistle } from "lucide-react";
 import { useState } from "react";
+import { useIsPhone } from "../lib/phone";
 import { useGameStory, useSelection } from "../lib/queries";
 import type { StoryPlayer, StorySide } from "../lib/types";
 import { BoxScore } from "./BoxScore";
@@ -18,6 +19,7 @@ export function GameStoryDrawer({ target, onClose }: { target: StoryTarget | nul
   const sel = useSelection();
   const logo = (s?: StorySide) => (s?.abbr ? sel.byAbbr.get(s.abbr)?.espn_abbr : undefined);
   const [tab, setTab] = useState<"story" | "box">("story");
+  const phone = useIsPhone();
 
   return (
     <Drawer
@@ -64,36 +66,40 @@ export function GameStoryDrawer({ target, onClose }: { target: StoryTarget | nul
 
           {/* Scoreboard */}
           <div className="panel overflow-hidden">
-            <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-4 px-6 py-6">
-              {(["away", "home"] as const).map((side, i) => {
-                const s = data[side];
-                const other = data[side === "away" ? "home" : "away"];
-                const won = (s.score ?? 0) > (other.score ?? 0);
-                return (
-                  <div key={side} className={cx("flex items-center gap-4", i === 1 && "col-start-3 flex-row-reverse text-right")}>
-                    <TeamLogo espnAbbr={logo(s)} size={64} />
-                    <div>
-                      <div className="eyebrow">{side}</div>
-                      <div className="display text-2xl font-bold">{s.abbr}</div>
+            {phone ? (
+              <PhoneScoreboard away={data.away} home={data.home} logo={logo} />
+            ) : (
+              <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-4 px-6 py-6">
+                {(["away", "home"] as const).map((side, i) => {
+                  const s = data[side];
+                  const other = data[side === "away" ? "home" : "away"];
+                  const won = (s.score ?? 0) > (other.score ?? 0);
+                  return (
+                    <div key={side} className={cx("flex items-center gap-4", i === 1 && "col-start-3 flex-row-reverse text-right")}>
+                      <TeamLogo espnAbbr={logo(s)} size={64} />
+                      <div>
+                        <div className="eyebrow">{side}</div>
+                        <div className="display text-2xl font-bold">{s.abbr}</div>
+                      </div>
+                      <div className={cx("display ml-auto text-6xl font-bold tabular", i === 1 && "mr-auto ml-0", won ? "text-fg" : "text-faint")}>
+                        {s.score}
+                      </div>
                     </div>
-                    <div className={cx("display ml-auto text-6xl font-bold tabular", i === 1 && "mr-auto ml-0", won ? "text-fg" : "text-faint")}>
-                      {s.score}
-                    </div>
-                  </div>
-                );
-              })}
-              <div className="col-start-2 row-start-1 text-xs font-semibold uppercase tracking-widest text-muted">Final</div>
-            </div>
+                  );
+                })}
+                <div className="col-start-2 row-start-1 text-xs font-semibold uppercase tracking-widest text-muted">Final</div>
+              </div>
+            )}
             {!!data.home.periods?.length && <LineScore away={data.away} home={data.home} />}
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid gap-4 sm:grid-cols-2">
             {(["away", "home"] as const).map((side) => (
               <Performers key={side} side={data[side]} logo={logo(data[side])} />
             ))}
           </div>
 
-          <div className="grid grid-cols-3 gap-3 text-xs">
+          <div className="grid gap-3 text-xs sm:grid-cols-3">
             {data.arena && <Fact icon={<MapPin />} label="Venue" value={data.arena} />}
             {!!data.attendance && <Fact icon={<UsersRound />} label="Attendance" value={data.attendance.toLocaleString()} />}
             {!!data.officials?.length && <Fact icon={<Whistle />} label="Officials" value={data.officials.join(", ")} />}
@@ -104,39 +110,66 @@ export function GameStoryDrawer({ target, onClose }: { target: StoryTarget | nul
   );
 }
 
+/** Phones: one row per team, so two 3-digit scores always fit. */
+function PhoneScoreboard({ away, home, logo }: { away: StorySide; home: StorySide; logo: (s?: StorySide) => string | undefined }) {
+  return (
+    <div className="px-4 py-3">
+      <div className="mb-1 text-[11px] font-semibold uppercase tracking-widest text-muted">Final</div>
+      {(["away", "home"] as const).map((side) => {
+        const s = side === "away" ? away : home;
+        const other = side === "away" ? home : away;
+        const won = (s.score ?? 0) > (other.score ?? 0);
+        return (
+          <div key={side} className="flex items-center gap-3 py-1.5">
+            <TeamLogo espnAbbr={logo(s)} size={36} />
+            <div className="min-w-0">
+              <div className="display text-xl leading-tight font-bold">{s.abbr}</div>
+              <div className="eyebrow text-[10px]">{side}</div>
+            </div>
+            <div className={cx("display ml-auto text-4xl font-bold tabular", won ? "text-fg" : "text-faint")}>{s.score}</div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function LineScore({ away, home }: { away: StorySide; home: StorySide }) {
   const n = Math.max(away.periods?.length ?? 0, home.periods?.length ?? 0);
   const label = (i: number) => (i < 4 ? `Q${i + 1}` : n - 4 > 1 ? `OT${i - 3}` : "OT");
   return (
-    <table className="phone-scroll w-full border-t border-line text-sm tabular">
-      <thead>
-        <tr className="text-[11px] uppercase tracking-wider text-muted">
-          <th className="py-2 pl-6 text-left font-medium">Team</th>
-          {Array.from({ length: n }, (_, i) => (
-            <th key={i} className="py-2 font-medium">
-              {label(i)}
-            </th>
-          ))}
-          <th className="py-2 pr-6 text-right font-medium">T</th>
-        </tr>
-      </thead>
-      <tbody>
-        {[away, home].map((s, r) => {
-          const other = r === 0 ? home : away;
-          return (
-            <tr key={r} className="border-t border-line/60">
-              <td className="py-2 pl-6 font-semibold">{s.abbr}</td>
-              {s.periods?.map((p, i) => (
-                <td key={i} className={cx("py-2 text-center", p > (other.periods?.[i] ?? 0) ? "text-fg" : "text-muted")}>
-                  {p}
-                </td>
-              ))}
-              <td className="py-2 pr-6 text-right font-bold">{s.score}</td>
-            </tr>
-          );
-        })}
-      </tbody>
-    </table>
+    // Full width; several overtimes scroll sideways inside the card.
+    <div className="overflow-x-auto border-t border-line">
+      <table className="w-full whitespace-nowrap text-sm tabular">
+        <thead>
+          <tr className="text-[11px] uppercase tracking-wider text-muted">
+            <th className="py-2 pl-6 text-left font-medium">Team</th>
+            {Array.from({ length: n }, (_, i) => (
+              <th key={i} className="py-2 font-medium">
+                {label(i)}
+              </th>
+            ))}
+            <th className="py-2 pr-6 text-right font-medium">T</th>
+          </tr>
+        </thead>
+        <tbody>
+          {[away, home].map((s, r) => {
+            const other = r === 0 ? home : away;
+            return (
+              <tr key={r} className="border-t border-line/60">
+                <td className="py-2 pl-6 font-semibold">{s.abbr}</td>
+                {s.periods?.map((p, i) => (
+                  <td key={i} className={cx("py-2 text-center", p > (other.periods?.[i] ?? 0) ? "text-fg" : "text-muted")}>
+                    {p}
+                  </td>
+                ))}
+                <td className="py-2 pr-6 text-right font-bold">{s.score}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
   );
 }
 

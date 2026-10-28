@@ -127,16 +127,17 @@ function bio(url) {
 
 const anthro = () => rs(["PLAYER_ID", "HEIGHT_WO_SHOES", "WEIGHT", "WINGSPAN", "STANDING_REACH", "HAND_LENGTH", "HAND_WIDTH", "BODY_FAT_PCT"], [{ PLAYER_ID: 1628369, HEIGHT_WO_SHOES: 79, WEIGHT: 204, WINGSPAN: 83.5, STANDING_REACH: 107, HAND_LENGTH: 9, HAND_WIDTH: 9.5, BODY_FAT_PCT: 5.4 }]);
 
-function v3Team(tri, tid, base) {
+// Overtime and 3-digit scores on both sides: the widest the scoreboard gets.
+function v3Team(tri, tid, base, ot = 0) {
   return {
-    teamTricode: tri, teamId: tid, score: base, periods: [28, 26, 30, base - 84].map((s) => ({ score: s })),
+    teamTricode: tri, teamId: tid, score: base, periods: [28, 26, 30, base - 84 - ot, ...(ot ? [ot] : [])].map((s) => ({ score: s })),
     statistics: { points: base, fieldGoalsMade: 42, fieldGoalsAttempted: 88, threePointersMade: 15, threePointersAttempted: 40, freeThrowsMade: 14, freeThrowsAttempted: 18, reboundsOffensive: 10, reboundsDefensive: 34, reboundsTotal: 44, assists: 26, steals: 7, blocks: 5, turnovers: 12, foulsPersonal: 18, plusMinusPoints: 0 },
     players: NAMES.slice(0, 10).map((n, i) => ({ personId: 1628369 + i, firstName: n.split(" ")[0], familyName: n.split(" ")[1], position: i < 5 ? POS[i] : "", comment: "", statistics: { minutes: `${36 - i * 2}:00`, points: 28 - i * 2, fieldGoalsMade: 10 - i, fieldGoalsAttempted: 19 - i, threePointersMade: 3, threePointersAttempted: 8, freeThrowsMade: 4, freeThrowsAttempted: 5, reboundsOffensive: 1, reboundsDefensive: 6, reboundsTotal: 7, assists: 5, steals: 1, blocks: 1, turnovers: 2, foulsPersonal: 2, plusMinusPoints: 8 - i } })),
   };
 }
 
-const boxSummary = () => ({ boxScoreSummary: { homeTeam: v3Team("BOS", 1610612738, 118), awayTeam: v3Team("LAL", 1610612747, 109), arena: { arenaName: "TD Garden", arenaCity: "Boston" }, attendance: 19156, officials: [{ name: "Scott Foster" }, { name: "Tony Brothers" }], gameLabel: "", gameSubLabel: "", seriesText: "" } });
-const boxTrad = () => ({ boxScoreTraditional: { homeTeam: v3Team("BOS", 1610612738, 118), awayTeam: v3Team("LAL", 1610612747, 109) } });
+const boxSummary = () => ({ boxScoreSummary: { homeTeam: v3Team("BOS", 1610612738, 125, 8), awayTeam: v3Team("LAL", 1610612747, 124, 7), arena: { arenaName: "TD Garden", arenaCity: "Boston" }, attendance: 19156, officials: [{ name: "Scott Foster" }, { name: "Tony Brothers" }], gameLabel: "", gameSubLabel: "", seriesText: "" } });
+const boxTrad = () => ({ boxScoreTraditional: { homeTeam: v3Team("BOS", 1610612738, 125, 8), awayTeam: v3Team("LAL", 1610612747, 124, 7) } });
 
 function espnTeam(abbr) {
   const t = TEAMS.find((x) => x[1] === abbr || (abbr === "GS" && x[1] === "GSW") || (abbr === "NY" && x[1] === "NYK"));

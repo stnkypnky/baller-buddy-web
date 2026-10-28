@@ -97,7 +97,7 @@ function Picker() {
       </Item>
       {isLoading && <Skeleton className="h-40 rounded-[18px]" />}
       {data && !games.length && <Empty title="No games today" hint="Open the Live page and browse to another date, then click a game." />}
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-4">
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(min(300px,100%),1fr))] gap-4">
         {games.map((g) => (
           <Item key={g.id}>
             <motion.button

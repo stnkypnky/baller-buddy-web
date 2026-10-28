@@ -207,26 +207,27 @@ function ScoreRow({ g, myAbbr, onOpen }: { g: ScoreGame; myAbbr?: string; onOpen
         mine && "bg-team/10 ring-1 ring-team-text/25",
       )}
     >
-      <div className="flex items-center justify-end gap-3">
+      <div className="flex min-w-0 items-center justify-end gap-3 max-sm:gap-1.5">
         <span className={cx("text-[13px] font-semibold", awayWon ? "text-fg" : "text-muted")}>
           <span className="max-sm:hidden">{away?.name ?? g.away.abbr}</span>
           <span className="sm:hidden">{g.away.abbr}</span>
         </span>
         <TeamLogo espnAbbr={away?.espn_abbr} size={28} />
       </div>
-      <div className="display flex w-28 items-center justify-center gap-2 text-2xl font-bold tabular max-sm:w-auto max-sm:text-xl">
+      <div className="display flex w-28 items-center justify-center gap-2 text-2xl font-bold tabular max-sm:w-auto max-sm:gap-1 max-sm:text-lg">
         <span className={awayWon ? "text-fg" : "text-faint"}>{g.away.pts}</span>
         <span className="text-sm text-faint">–</span>
         <span className={!awayWon ? "text-fg" : "text-faint"}>{g.home.pts}</span>
       </div>
-      <div className="flex items-center gap-3">
+      <div className="flex min-w-0 items-center gap-3 max-sm:gap-1.5">
         <TeamLogo espnAbbr={home?.espn_abbr} size={28} />
         <span className={cx("text-[13px] font-semibold", !awayWon ? "text-fg" : "text-muted")}>
           <span className="max-sm:hidden">{home?.name ?? g.home.abbr}</span>
           <span className="sm:hidden">{g.home.abbr}</span>
         </span>
       </div>
-      <div className="flex justify-end gap-1.5 whitespace-nowrap text-[10px] font-semibold uppercase tracking-wider max-sm:flex-col max-sm:items-end max-sm:gap-0.5">
+      {/* Phones: a narrow column; a long tag wraps to two lines within the row. */}
+      <div className="flex justify-end gap-1.5 whitespace-nowrap text-[10px] font-semibold uppercase tracking-wider max-sm:w-[68px] max-sm:flex-col max-sm:items-end max-sm:gap-0.5 max-sm:whitespace-normal max-sm:text-right max-sm:text-[9px] max-sm:leading-tight max-sm:tracking-normal">
         {g.ot && <span className="rounded bg-warn/15 px-1.5 py-0.5 text-warn">OT</span>}
         {g.pending && <span className="rounded bg-white/10 px-1.5 py-0.5 text-muted" title="Final on ESPN; nba.com's box score comes later">Box score soon</span>}
         {margin <= 3 && <span className="rounded bg-white/10 px-1.5 py-0.5 text-fg/80">Thriller</span>}

@@ -151,6 +151,11 @@ button:disabled { cursor: default; }
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
 
+/* Images in table cells keep their size: with the default max-width: 100% a
+   cell can shrink below its logo + name, and the name runs into the next
+   column. */
+td img, th img { max-width: none; }
+
 /* Phones: wide tables scroll sideways inside their panel instead of squeezing. */
 @media (max-width: 639px) {
   table.phone-scroll { display: block; overflow-x: auto; white-space: nowrap; scrollbar-width: none; }

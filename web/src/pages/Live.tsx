@@ -58,7 +58,7 @@ export default function LivePage() {
 
       {error && <ErrorState error={error} onRetry={() => refetch()} />}
       {isLoading && (
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(340px,1fr))] gap-4">
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(min(340px,100%),1fr))] gap-4">
           {Array.from({ length: 6 }, (_, i) => (
             <Skeleton key={i} className="h-[190px] rounded-[18px]" />
           ))}
@@ -66,7 +66,7 @@ export default function LivePage() {
       )}
       {data && !games.length && <Empty icon={<Radio className="size-8" />} title="No games on this date" hint="Use the arrows to browse other days." />}
 
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(340px,1fr))] gap-4">
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(min(340px,100%),1fr))] gap-4">
         {games.map((g, i) => (
           <Item key={g.id}>
             <GameCard g={g} index={i} onOpen={() => setOpen(g)} />

@@ -6,6 +6,7 @@ import { AssistantBody, ModelPicker, useProviders } from "../components/AiParts"
 import { BallMark } from "../components/shell";
 import { cx, IconButton, TeamLogo, Tip } from "../components/ui";
 import { sendChat, stopChat, useChatStore } from "../lib/ai";
+import { useIsPhone } from "../lib/phone";
 import { useSelection } from "../lib/queries";
 
 export default function AIPage() {
@@ -17,6 +18,16 @@ export default function AIPage() {
   const scroller = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
   const team = sel.team;
+  const phone = useIsPhone();
+
+  // Grow with what's actually in the box (wrapped lines and the placeholder
+  // included), up to about six lines, then scroll.
+  useEffect(() => {
+    const el = input.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(160, Math.max(44, el.scrollHeight))}px`;
+  }, [text, phone]);
 
   useEffect(() => {
     if (providers.data) setWeb(providers.data.settings.web_default);
@@ -149,20 +160,30 @@ export default function AIPage() {
               }
             }}
             rows={1}
-            placeholder={`Ask about the ${team?.nickname ?? "team"}, any player, or the league…`}
-            className="max-h-40 min-h-[44px] flex-1 resize-none bg-transparent px-3 py-2.5 text-[14px] outline-none placeholder:text-faint"
-            style={{ height: Math.min(160, 44 + (text.split("\n").length - 1) * 22) }}
+            placeholder={phone ? "Ask anything NBA…" : `Ask about the ${team?.nickname ?? "team"}, any player, or the league…`}
+            className="max-h-40 min-h-[44px] min-w-0 flex-1 resize-none bg-transparent px-3 py-2.5 text-[14px] outline-none placeholder:text-faint"
           />
-          <Tip label="Also search the web for this question">
-            <label className={cx("flex h-11 cursor-pointer items-center gap-2 rounded-xl px-3 text-xs", web ? "text-team-text" : "text-muted")}>
-              <Globe className="size-4" />
-              <Switch.Root checked={web} onCheckedChange={setWeb} className="relative h-5 w-9 rounded-full bg-white/10 transition-colors data-[state=checked]:bg-team">
-                <Switch.Thumb className="block size-4 translate-x-0.5 rounded-full bg-white shadow transition-transform data-[state=checked]:translate-x-[18px]" />
-              </Switch.Root>
-            </label>
-          </Tip>
+          {phone ? (
+            <button
+              onClick={() => setWeb(!web)}
+              aria-pressed={web}
+              aria-label="Also search the web"
+              className={cx("grid size-11 shrink-0 place-items-center rounded-xl transition-colors", web ? "bg-team/20 text-team-text" : "text-muted")}
+            >
+              <Globe className="size-5" />
+            </button>
+          ) : (
+            <Tip label="Also search the web for this question">
+              <label className={cx("flex h-11 cursor-pointer items-center gap-2 rounded-xl px-3 text-xs", web ? "text-team-text" : "text-muted")}>
+                <Globe className="size-4" />
+                <Switch.Root checked={web} onCheckedChange={setWeb} className="relative h-5 w-9 rounded-full bg-white/10 transition-colors data-[state=checked]:bg-team">
+                  <Switch.Thumb className="block size-4 translate-x-0.5 rounded-full bg-white shadow transition-transform data-[state=checked]:translate-x-[18px]" />
+                </Switch.Root>
+              </label>
+            </Tip>
+          )}
           {streaming ? (
-            <button onClick={stopChat} className="grid size-11 place-items-center rounded-xl bg-white/10 text-fg hover:bg-white/15" aria-label="Stop">
+            <button onClick={stopChat} className="grid size-11 shrink-0 place-items-center rounded-xl bg-white/10 text-fg hover:bg-white/15" aria-label="Stop">
               <Square className="size-4" />
             </button>
           ) : (
@@ -170,14 +191,14 @@ export default function AIPage() {
               whileTap={{ scale: 0.92 }}
               onClick={() => submit()}
               disabled={!text.trim()}
-              className="grid size-11 place-items-center rounded-xl bg-team text-team-on shadow-[0_8px_24px_-10px_var(--team-glow)] disabled:opacity-40"
+              className="grid size-11 shrink-0 place-items-center rounded-xl bg-team text-team-on shadow-[0_8px_24px_-10px_var(--team-glow)] disabled:opacity-40"
               aria-label="Send"
             >
               <ArrowUp className="size-5" />
             </motion.button>
           )}
         </div>
-        <div className="mt-1.5 text-center text-[10px] text-faint">Enter to send · Shift+Enter for a new line</div>
+        {!phone && <div className="mt-1.5 text-center text-[10px] text-faint">Enter to send · Shift+Enter for a new line</div>}
       </div>
     </div>
   );
