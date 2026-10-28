@@ -75,9 +75,10 @@ about 15 minutes.
    `npm run build`, deploy command `npx wrangler deploy` (the defaults are fine).
    Turn **Protect with Cloudflare Access** on (step 4 explains it). Deploy; you get
    `https://baller-buddy-<you>.workers.dev`.
-2. **KV namespace** for push subscriptions: Storage & Databases → KV → Create
-   `baller-buddy-push`, copy its id into `wrangler.jsonc` (replacing
-   `REPLACE_WITH_KV_NAMESPACE_ID`), commit and push. The next build deploys with it.
+2. **KV namespace** for push subscriptions: nothing to do. `wrangler.jsonc` declares
+   the `PUSH` binding without an id, so the first deploy creates the namespace and
+   links it. If that ever fails, create one under Storage & Databases → KV and put
+   its id in `wrangler.jsonc` as `"id": "…"`.
 3. **Push keys.** Run `node scripts/vapid-keys.mjs`. In the Worker → Settings →
    Variables and Secrets (the runtime ones, not Build) add `VAPID_PUBLIC_KEY`
    (text), `VAPID_PRIVATE_KEY` (secret) and `VAPID_SUBJECT` (text,
