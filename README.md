@@ -1,5 +1,7 @@
 # Baller Buddy (web app)
 
+**Open the app: https://baller-buddy-web.sc8r91.workers.dev**
+
 Baller Buddy as one installable web app (PWA), replacing the separate
 Windows/Linux desktop app ([`baller-buddy`](https://github.com/stnkypnky/baller-buddy))
 and Android app ([`baller-buddy-android`](https://github.com/stnkypnky/baller-buddy-android)).
