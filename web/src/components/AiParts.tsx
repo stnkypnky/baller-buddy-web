@@ -131,7 +131,7 @@ export function Markdown({ text }: { text: string }) {
           ),
         }}
       >
-        {text}
+        {text.replace(/<br\s*\/?>/gi, " · ")}
       </ReactMarkdown>
     </div>
   );

@@ -9,7 +9,7 @@ import { currentSeason } from "../config";
 import * as news from "../news";
 import * as data from "../nba/data";
 import * as services from "../nba/services";
-import { getTeamName } from "../nba/teams";
+import { findTeam, getTeamName } from "../nba/teams";
 import * as pulse from "../pulse";
 import * as settings from "../settings";
 import * as anthropicAdapter from "./anthropicAdapter";
@@ -129,7 +129,10 @@ async function viewLine(teamId: number | null | undefined, season: string, page:
   const name = getTeamName(teamId);
   const st: any = await data.fetchStandings(teamId, season, cache);
   const rec = st.wins !== undefined ? ` — ${st.wins}-${st.losses}, #${st.conf_rank} in the ${st.conference}` : "";
-  return `\n\nThe user is looking at the ${name} (${season})${rec} on the ${page || "Overview"} page. Assume questions are about this team unless they say otherwise.`;
+  return (
+    `\n\nThe user is looking at the ${name} (${season})${rec} on the ${page || "Overview"} page. Assume questions are about this team unless they say otherwise. ` +
+    `"The game", "tonight" or "last night" means the ${name} game: call get_game_details with team="${name}".`
+  );
 }
 
 export async function buildSystem(req: ChatRequest, cache: Cache, withTools: boolean) {
@@ -145,7 +148,7 @@ export async function buildSystem(req: ChatRequest, cache: Cache, withTools: boo
     }
     return `${persona}\n\n${MODE_PROMPTS[mode]}${extra}`;
   }
-  let sys = `${persona}\n\n${SCOPE_RULE}\n\n${CHAT_RULES}${await viewLine(req.team_id, season, req.page, cache)}${await todayBlock()}`;
+  let sys = `${persona}\n\n${SCOPE_RULE}\n\n${CHAT_RULES}${await viewLine(req.team_id, season, req.page, cache)}${await todayBlock(req.team_id)}`;
   if (!withTools && req.team_id) {
     sys += "\n\nYou have no live tools for this model; answer from this data snapshot:\n\n" + (await services.teamContext(req.team_id, season, cache));
   }
@@ -153,13 +156,15 @@ export async function buildSystem(req: ChatRequest, cache: Cache, withTools: boo
 }
 
 /** Today's slate, one line per game, so "the game tonight" needs no lookup. */
-async function todayBlock() {
+async function todayBlock(teamId?: number | null) {
   const sb = await data.fetchScoreboard().catch(() => null);
   if (!sb?.games.length) return "";
+  const mine = teamId ? findTeam(getTeamName(teamId))?.espn_id : undefined;
   const line = (g: data.LiveGame) => {
     const score = g.state === "pre" ? `${g.away.abbr} @ ${g.home.abbr}` : `${g.away.abbr} ${g.away.score} @ ${g.home.abbr} ${g.home.score}`;
     const state = g.state === "post" ? "Final" : g.state === "in" ? `LIVE ${g.status_text}` : g.status_text;
-    return `- ${score} · ${state} · game_id espn_${g.id}`;
+    const tag = mine && (g.home.espn_id === mine || g.away.espn_id === mine) ? " ← the user's team" : "";
+    return `- ${score} · ${state} · game_id espn_${g.id}${tag}`;
   };
   const lines = sb.games.slice(0, TODAY_LINES).map(line);
   return `\n\nTODAY'S NBA GAMES (Eastern date ${sb.date.slice(0, 10) || data.nbaToday()}; scores as of this message, use get_game_details for more):\n${lines.join("\n")}`;
@@ -251,9 +256,35 @@ export async function* chatEvents(req: ChatRequest, cache: Cache, signal?: Abort
     history[history.length - 1] = { ...last, content: last.content + SCOPE_REMINDER };
   }
 
+  // Game ids the model has actually seen: the user's words, today's slate,
+  // tool results. Small models otherwise make up plausible nba.com ids and
+  // answer about whatever game that turns out to be.
+  const seen = new Set<string>();
+  const noteIds = (text: string) => {
+    for (const m of text.matchAll(/\b(?:espn_)?(\d{9,10})\b/g)) seen.add(m[1]);
+  };
+  for (const m of history) noteIds(m.content);
+  const viewTeam = req.team_id ? getTeamName(req.team_id) : "";
+
   const toolRunner = (pid: string) => {
     const limit = providers.get(pid).local ? LOCAL_RESULT_CHARS : tools.MAX_RESULT_CHARS;
-    return (name: string, args: Record<string, unknown>) => tools.execute(name, args, cache, limit);
+    return async (name: string, args: Record<string, unknown>): Promise<[string, string, boolean]> => {
+      if (name === "get_game_details") {
+        const id = String(args.game_id ?? "").trim().replace(/^espn[_:-]?/i, "");
+        if (id && !seen.has(id)) {
+          if (args.team) args = { team: args.team };
+          else {
+            const instead = viewTeam ? ` Pass team instead, e.g. team="${viewTeam}".` : " Pass the team instead.";
+            return [JSON.stringify({ error: `game_id '${args.game_id}' isn't from any data in this conversation, so it's a guess.${instead}` }), "Skipped a guessed game id", false];
+          }
+        }
+        // "the game" on a team page is that team's game
+        if (!id && !args.team && viewTeam) args = { ...args, team: viewTeam };
+      }
+      const out = await tools.execute(name, args, cache, limit);
+      noteIds(out[0]);
+      return out;
+    };
   };
 
   const ai = await settings.get("ai");
@@ -277,6 +308,7 @@ export async function* chatEvents(req: ChatRequest, cache: Cache, signal?: Abort
       yield sse("meta", { provider: pid, provider_name: name, model, tools: attemptTools });
       try {
         const system = await buildSystem(req, cache, attemptTools);
+        noteIds(system);
         const specs = attemptTools ? tools.SPECS : null;
         for await (const ev of adapter(pid)(pid, model, system, history, specs, toolRunner(pid), signal)) {
           if (ev.type === "token" || ev.type === "reasoning" || ev.type === "tool_call") emitted = true;

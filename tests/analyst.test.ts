@@ -208,3 +208,35 @@ describe("announcer", () => {
     expect(pickVoice([v("Amélie", "fr-CA"), v("Karen", "en-AU")])?.name).toBe("Karen");
   });
 });
+
+describe("guessed game ids", () => {
+  beforeEach(() => {
+    data.clearRecentFinals();
+    nba();
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("refuses an id the model never saw, and defaults to the team being viewed", async () => {
+    const replies = [
+      { tool_calls: [{ index: 0, id: "a", function: { name: "get_game_details", arguments: '{"game_id":"0022600120"}' } }] },
+      { tool_calls: [{ index: 0, id: "b", function: { name: "get_game_details", arguments: "{}" } }] },
+      { content: "Celtics won." },
+    ];
+    const sent: any[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (_u: string, init: RequestInit) => {
+      sent.push(JSON.parse(String(init.body)));
+      const d = replies[sent.length - 1];
+      return new Response(`data: ${JSON.stringify({ choices: [{ index: 0, delta: d }] })}\n\ndata: [DONE]\n\n`, { headers: { "content-type": "text/event-stream" } });
+    }));
+    await settings.update("ai", { custom_base_url: "http://mock.local/v1", provider: "custom", model: "m", fallbacks: [], no_tools: [] });
+    const events: any[] = [];
+    for await (const e of router.chatEvents({ messages: [{ role: "user", content: "how was the game tonight?" }], mode: "chat", team_id: BOS }, new Cache({ persist: false }))) events.push(e);
+    const results = events.filter((e) => e.event === "tool_result").map((e) => e.data);
+    expect(results[0]).toMatchObject({ ok: false, summary: "Skipped a guessed game id" });
+    expect(sent[1].messages.at(-1).content).toContain('team=\\"Boston Celtics\\"');
+    expect(results[1]).toMatchObject({ ok: true, summary: "Pulled game story" });
+    expect(sent[2].messages.at(-1).content).toContain("espn_401800001");
+    // the slate marks the viewed team's game
+    expect(sent[0].messages[0].content).toContain("game_id espn_401800001 ← the user's team");
+  });
+});
