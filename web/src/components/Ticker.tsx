@@ -14,19 +14,29 @@ export default function Ticker() {
   const { data } = useLive();
   const games = data?.games ?? [];
   const strip = useRef<HTMLDivElement>(null);
-  const [duration, setDuration] = useState(60);
+  const paused = useRef(false);
 
-  // The strip holds the games twice and slides by half its width per loop, so
-  // the loop time follows from that width. Set as a plain animation-duration
-  // (not a CSS variable), which Safari applies reliably.
+  // Moved frame by frame from the real clock rather than by a CSS animation:
+  // Safari on iPad ran the CSS version far too fast. The strip holds the games
+  // twice, so after half its width it wraps around seamlessly.
   useEffect(() => {
     const el = strip.current;
     if (!el) return;
-    const measure = () => setDuration(Math.max(20, el.scrollWidth / 2 / SPEED));
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
+    let raf = 0;
+    let last = performance.now();
+    let x = 0;
+    const step = (t: number) => {
+      const dt = Math.min(t - last, 100) / 1000; // no jump after the tab was hidden
+      last = t;
+      const half = el.scrollWidth / 2;
+      if (!paused.current && half > 0) {
+        x = (x + SPEED * dt) % half;
+        el.style.transform = `translate3d(${-x}px, 0, 0)`;
+      }
+      raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
   }, [games.length]);
 
   if (!games.length) return null;
@@ -34,8 +44,12 @@ export default function Ticker() {
   // duplicate the strip so the marquee loops seamlessly
   const doubled = [...games, ...games];
   return (
-    <div className="no-drag group relative mx-auto flex h-7 max-w-[760px] items-center overflow-hidden rounded-full border border-line/70 bg-black/30 [mask-image:linear-gradient(90deg,transparent,black_6%,black_94%,transparent)]">
-      <div ref={strip} className="marquee flex shrink-0 items-center gap-6 pl-6" style={{ animationDuration: `${duration.toFixed(1)}s` }}>
+    <div
+      onMouseEnter={() => (paused.current = true)}
+      onMouseLeave={() => (paused.current = false)}
+      className="no-drag group relative mx-auto flex h-7 max-w-[760px] items-center overflow-hidden rounded-full border border-line/70 bg-black/30 [mask-image:linear-gradient(90deg,transparent,black_6%,black_94%,transparent)]"
+    >
+      <div ref={strip} className="marquee flex shrink-0 items-center gap-6 pl-6 will-change-transform">
         {doubled.map((g, i) => (
           <TickerItem key={`${g.id}-${i}`} g={g} />
         ))}

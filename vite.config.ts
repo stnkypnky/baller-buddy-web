@@ -1,3 +1,4 @@
+import { execSync } from "node:child_process";
 import { defineConfig, type Connect, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
@@ -37,10 +38,25 @@ function devProxy(): Plugin {
   };
 }
 
+/** Shown in Settings so it's easy to tell which build a device is running.
+ *  Cloudflare's builds pass the commit; locally, ask git. */
+function buildLabel() {
+  let sha = process.env.WORKERS_CI_COMMIT_SHA ?? "";
+  if (!sha) {
+    try {
+      sha = execSync("git rev-parse HEAD", { stdio: ["ignore", "pipe", "ignore"] }).toString();
+    } catch {
+      sha = "dev";
+    }
+  }
+  return `${sha.trim().slice(0, 7)} · ${new Date().toISOString().slice(0, 16).replace("T", " ")} UTC`;
+}
+
 // The app lives in web/. The Cloudflare Worker (worker/) serves dist/ plus the /api routes.
 export default defineConfig({
   root: "web",
   base: "/",
+  define: { __BUILD__: JSON.stringify(buildLabel()) },
   plugins: [
     react(),
     tailwindcss(),

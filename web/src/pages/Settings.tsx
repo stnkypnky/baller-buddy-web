@@ -387,6 +387,7 @@ function DeveloperSettings() {
         label="Show AI reasoning"
         hint="Show the model's thinking and step-by-step status above each answer"
       />
+      <div className="mt-3 text-[11px] text-faint tabular">Version {__BUILD__}</div>
     </Panel>
   );
 }
