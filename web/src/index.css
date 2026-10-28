@@ -126,7 +126,7 @@ body {
 
 /* Ticker marquee */
 @keyframes marquee { from { transform: translateX(0); } to { transform: translateX(-50%); } }
-.marquee { animation: marquee var(--marquee-duration, 60s) linear infinite; }
+.marquee { animation: marquee 60s linear infinite; } /* duration set by Ticker from its width */
 .marquee:hover { animation-play-state: paused; }
 
 /* Markdown (AI answers) */
