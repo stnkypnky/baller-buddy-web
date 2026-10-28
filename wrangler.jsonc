@@ -4,6 +4,9 @@
   "name": "baller-buddy-web",
   "main": "worker/index.ts",
   "compatibility_date": "2026-10-01",
+  // the public *.workers.dev address (put Cloudflare Access in front of it, see README)
+  "workers_dev": true,
+  "preview_urls": false,
   "assets": {
     "directory": "./dist",
     "binding": "ASSETS",
