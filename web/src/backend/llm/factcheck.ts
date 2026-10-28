@@ -79,7 +79,8 @@ function checkPlayers(answer: string, data: string, named: IndexedPlayer[], opts
   for (const p of named) {
     const inData = data.includes(fold(p.name)) || (!!p.row && wordIn(data, lastName(p.name)) && lastName(p.name).length >= 5);
     if (!inData) {
-      problems.push({ player: p, reason: "not in the data this answer was built from" });
+      // a legend mentioned in passing isn't a claim; his numbers are still checked
+      if (!p.retired) problems.push({ player: p, reason: "not in the data this answer was built from" });
       continue;
     }
     if (!p.team_abbr || opts.teams === false) continue;
@@ -152,6 +153,13 @@ function playerWindows(data: string, p: IndexedPlayer): string[] {
       const open = data.lastIndexOf("{", i);
       const inRecord = open > data.lastIndexOf("}", i) && open > data.lastIndexOf("\n", i) && i - open < 300;
       const start = inRecord ? open : i;
+      // a player's card or career block runs on for several lines: take the block
+      const lineStart = data.lastIndexOf("\n", i) + 1;
+      if (/^(CAREER|PLAYER|COMPARE) /.test(data.slice(lineStart, lineStart + 8))) {
+        const next = data.slice(i).search(/\n\n|\n(?:PLAYER|TEAM|CAREER|GAMES ON|\[)/);
+        out.push(data.slice(lineStart, next < 0 ? data.length : i + next));
+        continue;
+      }
       const nl = data.indexOf("\n", i);
       const close = data.indexOf("}", i);
       const end = Math.min(nl < 0 ? data.length : nl, close < 0 ? data.length : close + 1, i + 400);
@@ -160,6 +168,9 @@ function playerWindows(data: string, p: IndexedPlayer): string[] {
   }
   return out;
 }
+
+const SPECULATIVE =
+  /\b(would|wouldn'?t|could|might|projects?|projected|projection|predict(?:ed|ion)?|expect(?:ed)?|likely|imagine|hypothetical(?:ly)?|in a series|my pick|i'?d (?:take|pick|say)|i think|estimate[ds]?|if (?:he|they|we|you)|in theory)\b/i;
 
 const STAT_UNITS =
   "points?|pts|ppg|rebounds?|rebs?|rpg|boards|assists?|asts?|apg|dimes|steals?|stl|spg|blocks?|blk|bpg|threes|3s|3-pointers|triples|minutes|mins?|mpg|turnovers?|tov";
@@ -173,6 +184,8 @@ function checkNumbers(answer: string, dataText: string, named: IndexedPlayer[], 
   const dataLines = dataText.split("\n");
 
   for (const s of sentences(answer)) {
+    // a hypothetical or a prediction isn't a claim of fact
+    if (SPECULATIVE.test(s)) continue;
     // a season ("2026-27"), a date ("10/26"), a time ("7:30") isn't a claim
     const plain = s.replace(/\b(19|20)\d\d(?:-\d\d)?\b/g, " ").replace(/\b\d{1,2}[/:]\d{1,2}\b/g, " ");
 

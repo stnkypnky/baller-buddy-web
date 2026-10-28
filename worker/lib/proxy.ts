@@ -33,6 +33,12 @@ const RULES: Record<string, HostRule> = {
   "cdn.nba.com": { headers: { "User-Agent": BROWSER_UA, Referer: "https://www.nba.com/" }, edgeTtl: 86400 },
   "ak-static.cms.nba.com": { headers: { "User-Agent": BROWSER_UA, Referer: "https://www.nba.com/" }, edgeTtl: 86400 },
   "site.api.espn.com": { headers: { "User-Agent": BROWSER_UA }, edgeTtl: 0 },
+  // Basketball history and background for the AI analyst. Wikimedia asks API
+  // clients to identify themselves.
+  "en.wikipedia.org": {
+    headers: { "User-Agent": "BallerBuddy/3.0 (https://baller-buddy-web.sc8r91.workers.dev; NBA fan app)", "Api-User-Agent": "BallerBuddy/3.0" },
+    edgeTtl: 86400,
+  },
   // ESPN's other API host: the scoreboard fallback when one day's answer from
   // site.api is broken.
   "site.web.api.espn.com": { headers: { "User-Agent": BROWSER_UA }, edgeTtl: 0 },

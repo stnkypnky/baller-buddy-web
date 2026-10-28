@@ -14,7 +14,7 @@ import * as pulse from "../pulse";
 import * as settings from "../settings";
 import * as anthropicAdapter from "./anthropicAdapter";
 import { checkAnswer, correctionSheet, issueCount, type CheckOptions } from "./factcheck";
-import { ground, playerIndex, shiftDay, type PlayerIndex } from "./grounding";
+import { fold, ground, namedPlayerData, playerIndex, shiftDay, type PlayerIndex } from "./grounding";
 import * as openaiAdapter from "./openaiAdapter";
 import { ToolsUnsupported, type ChatMessage } from "./openaiAdapter";
 import * as providers from "./providers";
@@ -47,8 +47,8 @@ const SCOPE_RULE =
 const SCOPE_REMINDER = `\n\n(Reminder: answer only if this is about the NBA; otherwise reply exactly "${OFF_TOPIC_REPLY}")`;
 
 const BASE_PERSONA =
-  "You are the AI analyst inside Baller Buddy, an NBA app — sharp, specific, " +
-  "and fun to read, like a great beat writer who also knows the numbers. Today is {today}.";
+  "You are the AI analyst inside Baller Buddy, an NBA app, and an expert on the game's whole history, from the 1940s to tonight — " +
+  "sharp, specific and fun to read, like a great beat writer who also knows the numbers. Today is {today}.";
 
 const CHAT_RULES =
   "Your training knowledge of rosters, trades, injuries and results is out of date. Only the DATA blocks, " +
@@ -64,7 +64,12 @@ const CHAT_RULES =
   "- team record, form, averages → get_team_report; roster and minutes → get_roster; game log → get_team_games\n" +
   "- where teams rank (offense, defense, pace…) → get_league_leaders (team=… for one team's rank); standings → get_standings\n" +
   "- seasons past, best seasons, trends → get_team_history; two teams side by side → compare_teams\n" +
-  "- injuries → get_injuries; news → get_news (kind=rumors for trades); schedule → get_upcoming_games; anything else → web_search\n" +
+  "- injuries → get_injuries; news → get_news (kind=rumors for trades); schedule → get_upcoming_games\n" +
+  "- a past player, a player's prime or career, any past season of his → get_player_career; leaders of any past season → get_player_leaders(season=…)\n" +
+  "- two players from any eras, hypotheticals, all-time debates → compare_players; a team's past seasons → get_team_history\n" +
+  "- history, accolades, playing style, rivalries, eras, rule changes → get_background; anything else → web_search\n" +
+  "For hypotheticals and all-time debates: ground each player in his own numbers (his prime is his best 5-season stretch), " +
+  "account for era (league scoring, pace, the 3-point line from 1979-80, hand-checking until 2004-05), then give a clear verdict and say it's your opinion.\n" +
   "For predictions: give the betting line first, then the app's estimate, form and injuries, and call them estimates.\n" +
   "Format answers in Markdown: a one-line takeaway first, then short sections or bullets; " +
   "use a compact table when comparing several numbers. Keep it tight unless asked for depth.";
@@ -232,6 +237,8 @@ async function* factCheck(
   run: (history: ChatMessage[]) => AsyncGenerator<{ type: string; text?: string }>,
   history: ChatMessage[],
   opts: CheckOptions = {},
+  /** Data fetched just for the check (players the answer named on its own). */
+  extra = "",
 ): AsyncGenerator<SseEvent> {
   yield sse("status", { text: "Checking facts…" });
   const res = checkAnswer(draft, dataText, idx, opts);
@@ -241,7 +248,8 @@ async function* factCheck(
     yield sse("factcheck", { checked, fixed: 0, names: [] });
     return;
   }
-  const revised: ChatMessage[] = [...history, { role: "assistant", content: draft }, { role: "user", content: correctionSheet(res.problems, res.claims) }];
+  const sheet = correctionSheet(res.problems, res.claims) + (extra ? `\n\nDATA for players your answer named:\n${extra}` : "");
+  const revised: ChatMessage[] = [...history, { role: "assistant", content: draft }, { role: "user", content: sheet }];
   let started = false;
   let text = "";
   try {
@@ -455,7 +463,12 @@ export async function* chatEvents(req: ChatRequest, cache: Cache, signal?: Abort
           const facts = [system, dataText, req.context ?? "", ...toolTexts].join("\n");
           const index = idx ?? (await playerIndex(cache).catch(() => null));
           if (index) {
-            yield* factCheck(draft, facts, index, (h) => adapter(pid)(pid, model, system, h, null, toolRunner(pid), signal), history, { teams: mode !== "brief" });
+            // Players the answer brings up that nothing looked up yet: fetch their
+            // data first, so they're checked on their numbers, not just flagged.
+            const known = fold(facts);
+            const missing = index.find(draft, 12).filter((p) => !known.includes(fold(p.name)));
+            const extra = missing.length ? await namedPlayerData(missing, cache).catch(() => "") : "";
+            yield* factCheck(draft, `${facts}\n${extra}`, index, (h) => adapter(pid)(pid, model, system, h, null, toolRunner(pid), signal), history, { teams: mode !== "brief" }, extra);
           }
         }
         if (mode === "chat") yield sse("digest", { text: digest(cardText, toolTexts) });

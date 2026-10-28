@@ -6,6 +6,7 @@ import type { Cache } from "../cache";
 import { currentSeason, parseSeasonType, SEASON_TYPE_FULL, SEASON_TYPE_PLAYOFFS, seasonStartYear } from "../config";
 import * as news from "../news";
 import * as data from "../nba/data";
+import * as history from "../nba/history";
 import * as services from "../nba/services";
 import { round } from "../nba/stats";
 import { ESPN_ID_TO_NAME, findTeam, getTeamAbbr, getTeamName, type Team } from "../nba/teams";
@@ -15,7 +16,7 @@ import { zoneSummary } from "./shotzones";
 export const MAX_RESULT_CHARS = 9000;
 /** Compact text tools that cover a whole slate or league: they get room for
  *  all of it even when results are kept short (local models). */
-const WHOLE_LEAGUE = new Set(["get_game_previews", "get_standings", "get_season_games"]);
+const WHOLE_LEAGUE = new Set(["get_game_previews", "get_standings", "get_season_games", "get_player_career", "compare_players"]);
 const WHOLE_LEAGUE_CHARS = 7000;
 
 const SEASON = { type: "string", description: "e.g. '2025-26'; omit for current." };
@@ -119,7 +120,7 @@ export const SPECS: ToolSpec[] = [
     description:
       "League-wide PLAYER leaderboard for one per-game stat: " +
       data.PLAYER_LEADER_CATEGORIES.map((c) => c[0]).join(", ") +
-      ". Qualified players only (70% of games; minimum makes for FG%/3P%/FT%). `player` adds that player's rank; `rookies` limits to rookies.",
+      ". Any season back to the 1950s. Qualified players only (70% of games; minimum makes for FG%/3P%/FT%). `player` adds that player's rank; `rookies` limits to rookies.",
     parameters: { type: "object", properties: {
       category: { type: "string", description: "One of the categories listed above." },
       season: SEASON,
@@ -160,6 +161,36 @@ export const SPECS: ToolSpec[] = [
     name: "get_injuries",
     description: "The current NBA injury report: who is out or questionable, the injury, and the expected return. For one team or the whole league.",
     parameters: { type: "object", properties: { team: TEAM } },
+  },
+  {
+    name: "get_player_career",
+    description:
+      "Any player's whole career, from any era (e.g. Larry Bird, Bill Russell, LeBron James): every season and playoff run " +
+      "(age, team, per-game stats, shooting, TS%), career totals, awards (titles, MVPs, All-NBA, All-Star…), and his best 3- and 5-season stretch. " +
+      "Use for past players, a player's prime, or any season before this one.",
+    parameters: { type: "object", properties: {
+      name: { type: "string", description: "Player's full name." },
+      playoffs: { type: "boolean", description: "Include each playoff run (default true)." },
+    }, required: ["name"] },
+  },
+  {
+    name: "compare_players",
+    description:
+      "Two players from any eras side by side: careers, best 5-season stretches (their primes), best seasons, honors, and how much " +
+      "the league scored in each one's prime. Pass seasons to compare specific years. Use for hypotheticals and all-time debates.",
+    parameters: { type: "object", properties: {
+      player_a: { type: "string" },
+      player_b: { type: "string" },
+      season_a: { type: "string", description: "e.g. '1985-86'; omit for career and prime." },
+      season_b: { type: "string" },
+    }, required: ["player_a", "player_b"] },
+  },
+  {
+    name: "get_background",
+    description: "Background from Wikipedia on any basketball topic: a player's story and accolades, a team's or season's history, a rivalry, an era, a rule change.",
+    parameters: { type: "object", properties: {
+      topic: { type: "string", description: "e.g. 'Larry Bird', '1985–86 NBA season', 'Celtics–Lakers rivalry'." },
+    }, required: ["topic"] },
   },
   {
     name: "web_search",
@@ -209,6 +240,14 @@ async function findPlayers(name: string) {
   if (!hits.length) hits = all.filter((p) => fold(p[1]).includes(q));
   // active players first
   return hits.sort((a, b) => b[2] - a[2]).map(([id, full_name, active]) => ({ id, full_name, is_active: !!active }));
+}
+
+/** The player a name means: the bundled list (every player ever), then this season's league. */
+async function onePlayer(name: string, cache: Cache) {
+  const listed = await findPlayers(name.trim());
+  const hits = listed.length ? listed : await findInLeague(name.trim(), currentSeason(), cache);
+  if (!hits.length) throw new ToolError(`No NBA player named '${name}'. Check the spelling.`);
+  return hits[0];
 }
 
 async function findInLeague(name: string, s: string, cache: Cache) {
@@ -501,6 +540,18 @@ const EXECUTORS: Record<string, Exec> = {
     const matches = listed.length ? listed : await findInLeague(name, s, cache);
     if (!matches.length) throw new ToolError(`No player named '${name}' has played in ${s}. Check the spelling, or pass a season.`);
     const p = matches[0];
+    if (history.isOldSeason(s)) {
+      // nba.com's game logs and dashboards start in 1996-97; the career table has every season
+      const c = await history.fetchCareer(p.id, p.full_name, p.is_active, cache);
+      const reg = c?.regular.find((l) => l.season === s);
+      if (!c || !reg) return [{ player: p.full_name, season: s, note: `No ${s} season on record for ${p.full_name}.` }, `Looked up ${p.full_name}`];
+      const po = c.playoffs.find((l) => l.season === s);
+      const won = Object.entries(c.awards).filter(([, ss]) => ss.includes(s)).map(([k]) => k);
+      return [
+        { player: c.name, season: s, team: reg.team, regular_season: history.seasonText(reg), playoffs: po ? history.seasonText(po) : "no playoffs", honors_that_season: won.length ? won.join(", ") : "none", note: "For the full career use get_player_career." },
+        `Pulled ${c.name} ${s}`,
+      ];
+    }
     const games = await data.fetchPlayerGamelog(p.id, s, cache, 0);
     if (!games.length) return [{ player: p.full_name, season: s, note: "No games logged this season." }, `Looked up ${p.full_name}`];
     // The player's current team is the first token of his latest MATCHUP.
@@ -596,6 +647,21 @@ const EXECUTORS: Record<string, Exec> = {
     const [label, field, fmt, definition, qual] = cat;
     const s = season(args);
     const rookies = args.rookies === true || args.rookies === "true";
+    if (history.isOldSeason(s)) {
+      // before 1996-97: nba.com's season leaders, qualified by that era's rules
+      const rows = await history.fetchHistoricalLeaders(s, field, cache);
+      if (!rows.length) throw new ToolError(`nba.com has no ${label} leaders for ${s}.`);
+      const top = clampInt(args.top, 10, 1, 25);
+      const entry = (r: any) => ({ rank: r.RANK, player: r.PLAYER, team: r.TEAM, gp: r.GP, value: data.pyFormat(fmt, Number(r[field])) });
+      const out: Record<string, unknown> = { category: label, definition, season: s, qualifier: "that season's league rules", ranking: rows.slice(0, top).map(entry) };
+      if (rookies) out.note = "Rookie-only leaders aren't available before 1996-97.";
+      if (args.player) {
+        const name = String(args.player).trim().toLowerCase();
+        const hit = rows.find((r: any) => String(r.PLAYER).toLowerCase().includes(name));
+        out.player_rank = hit ? entry(hit) : `${args.player} isn't among that season's qualified leaders for ${label}.`;
+      }
+      return [out, `Ranked ${s} players by ${label}`];
+    }
     const rows = await data.fetchLeaguePlayerStats(s, cache, rookies);
     const ranked = data.topPlayers(rows, field, qual, rows.length);
     const entry = (i: number, r: data.LeaguePlayerRow) => ({
@@ -643,6 +709,43 @@ const EXECUTORS: Record<string, Exec> = {
     }
     const league = Object.entries(report).filter(([, rows]) => rows.length).map(([team, rows]) => ({ team, injuries: slim(rows) }));
     return [league, "Read the injury report"];
+  },
+
+  async get_player_career(args, cache) {
+    const p = await onePlayer(String(args.name), cache);
+    const c = await history.fetchCareer(p.id, p.full_name, p.is_active, cache);
+    if (!c) throw new ToolError(`nba.com has no career stats for ${p.full_name}.`);
+    return [history.careerText(c, { playoffs: args.playoffs !== false && args.playoffs !== "false" }), `Pulled ${c.name}'s career`];
+  },
+
+  async compare_players(args, cache) {
+    const [a, b] = await Promise.all([onePlayer(String(args.player_a), cache), onePlayer(String(args.player_b), cache)]);
+    const [ca, cb] = await Promise.all([history.fetchCareer(a.id, a.full_name, a.is_active, cache), history.fetchCareer(b.id, b.full_name, b.is_active, cache)]);
+    if (!ca || !cb) throw new ToolError(`nba.com has no career stats for ${!ca ? a.full_name : b.full_name}.`);
+    const side = async (c: history.Career, season?: string) => {
+      const out = [history.careerSummary(c)];
+      if (season) {
+        const s = String(season).trim();
+        const reg = c.regular.find((l) => l.season === s);
+        const po = c.playoffs.find((l) => l.season === s);
+        out.push(reg ? `chosen season ${history.seasonText(reg)}` : `no regular season ${s} for ${c.name}`);
+        if (po) out.push(`chosen season playoffs ${history.seasonText(po)}`);
+      }
+      // the league's scoring level in his prime (middle of his best 5), for era context
+      const mid = c.peak5?.seasons.split(" to ")[0];
+      const ref = season || (mid ? history.seasonOf(seasonStartYear(mid) + 2) : "");
+      const lg = ref ? await history.fetchLeagueAverages(ref, cache).catch(() => null) : null;
+      if (lg) out.push(`league in ${lg.season}: ${lg.ppg.toFixed(1)} pts per team game, FG ${lg.fg_pct.toFixed(1)}%, ${lg.fg3a.toFixed(1)} 3PA per team game`);
+      return out.join("\n");
+    };
+    return [`COMPARE ${ca.name} vs ${cb.name}\n\n${await side(ca, args.season_a)}\n\n${await side(cb, args.season_b)}`, `Compared ${ca.name} and ${cb.name}`];
+  },
+
+  async get_background(args, cache) {
+    const topic = String(args.topic).trim();
+    const bg = await history.fetchBackground(topic, cache);
+    if (!bg) return [`No Wikipedia article found for "${topic}".`, "Looked for background"];
+    return [`${bg.title} (Wikipedia, ${bg.url}):\n${bg.text}`, `Read about ${bg.title}`];
   },
 
   async web_search(args) {

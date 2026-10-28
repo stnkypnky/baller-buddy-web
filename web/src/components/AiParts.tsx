@@ -2,6 +2,7 @@ import * as Popover from "@radix-ui/react-popover";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   BarChart3,
+  BookOpen,
   Box,
   Brain,
   CalendarDays,
@@ -58,6 +59,9 @@ const TOOL_ICONS: Record<string, ReactNode> = {
   get_game_previews: <Target />,
   get_team_history: <History />,
   get_season_games: <ListOrdered />,
+  get_player_career: <History />,
+  compare_players: <Swords />,
+  get_background: <BookOpen />,
   web_search: <Globe />,
 };
 

@@ -8,6 +8,7 @@ import type { Cache } from "../cache";
 import { currentSeason, seasonStartYear } from "../config";
 import * as news from "../news";
 import * as data from "../nba/data";
+import * as history from "../nba/history";
 import * as services from "../nba/services";
 import { TEAMS } from "../nba/teamData";
 import { getTeamName, type Team } from "../nba/teams";
@@ -63,6 +64,8 @@ export interface IndexedPlayer {
   team_abbr?: string;
   team_id?: number;
   row?: data.LeaguePlayerRow;
+  /** Not an active player: matched by full name or nickname only. */
+  retired?: boolean;
 }
 
 // Well-known nicknames -> full names. Used only if that player is in the index.
@@ -72,6 +75,13 @@ const NICKNAMES: Record<string, string> = {
   luka: "Luka Dončić", steph: "Stephen Curry", joker: "Nikola Jokić", "ant-man": "Anthony Edwards", ant: "Anthony Edwards",
   dame: "Damian Lillard", cp3: "Chris Paul", zion: "Zion Williamson", trae: "Trae Young", jokic: "Nikola Jokić",
   embiid: "Joel Embiid", jt: "Jayson Tatum", jb: "Jaylen Brown", "the brow": "Anthony Davis", spida: "Donovan Mitchell",
+  // legends
+  mj: "Michael Jordan", "his airness": "Michael Jordan", "larry legend": "Larry Bird", shaq: "Shaquille O'Neal",
+  kobe: "Kobe Bryant", "the mamba": "Kobe Bryant", "the dream": "Hakeem Olajuwon", hakeem: "Hakeem Olajuwon",
+  "the mailman": "Karl Malone", "the admiral": "David Robinson", "dr j": "Julius Erving", "the big fundamental": "Tim Duncan",
+  kareem: "Kareem Abdul-Jabbar", wilt: "Wilt Chamberlain", "the big o": "Oscar Robertson", "the logo": "Jerry West",
+  "the answer": "Allen Iverson", dirk: "Dirk Nowitzki", "pistol pete": "Pete Maravich",
+  "the glove": "Gary Payton", "penny": "Anfernee Hardaway", kg: "Kevin Garnett", "the truth": "Paul Pierce",
 };
 // Last names that are everyday words: only matched when capitalized.
 const COMMON_WORDS = new Set([
@@ -91,11 +101,12 @@ export class PlayerIndex {
   constructor(league: data.LeaguePlayerRow[], listed: [number, string, number][] = []) {
     const byPid = new Map<number, IndexedPlayer>();
     for (const r of league) byPid.set(r.pid, { pid: r.pid, name: r.name, team_abbr: r.team_abbr, team_id: r.team_id, row: r });
-    for (const [pid, name, active] of listed) if (active && !byPid.has(pid)) byPid.set(pid, { pid, name });
+    for (const [pid, name, active] of listed) if (!byPid.has(pid)) byPid.set(pid, active ? { pid, name } : { pid, name, retired: true });
     this.list = [...byPid.values()];
     for (const p of this.list) {
       const k = fold(p.name);
-      this.full.set(k, [...(this.full.get(k) ?? []), p]);
+      // the same name in two eras (Gary Payton, Gary Payton II): the current player first
+      this.full.set(k, p.retired ? [...(this.full.get(k) ?? []), p] : [p, ...(this.full.get(k) ?? [])]);
       if (p.row) {
         const l = lastName(p.name);
         if (l.length >= 4) this.last.set(l, [...(this.last.get(l) ?? []), p]);
@@ -205,7 +216,7 @@ export interface Card {
 const pct = (v: unknown) => (typeof v === "number" ? `${(v * 100).toFixed(1)}%` : "");
 const num1 = (v: unknown) => (typeof v === "number" ? v.toFixed(1) : "?");
 
-async function playerCard(p: IndexedPlayer, idx: PlayerIndex, injuries: Record<string, news.InjuryRow[]>, cache: Cache, withLog: boolean): Promise<Card> {
+async function playerCard(p: IndexedPlayer, injuries: Record<string, news.InjuryRow[]>, cache: Cache, withLog: boolean): Promise<Card> {
   const season = currentSeason();
   const injured = Object.entries(injuries).flatMap(([team, rows]) => rows.filter((r) => fold(r.player) === fold(p.name)).map((r) => ({ team, ...r })))[0];
   const lines: string[] = [];
@@ -225,8 +236,26 @@ async function playerCard(p: IndexedPlayer, idx: PlayerIndex, injuries: Record<s
     const games = await data.fetchPlayerGamelog(p.pid, season, cache, 5).catch(() => []);
     if (games.length) lines.push("last games: " + [...games].reverse().map((g) => `${g.date} ${g.matchup} ${g.pts}p ${g.reb}r ${g.ast}a`).join("; "));
   }
-  void idx;
   return { label: p.name, text: `PLAYER ${lines.join(" · ")}` };
+}
+
+/** Questions about the past: a prime, a career, an era, a hypothetical, a year. */
+export const HISTORY = /\b(prime|peak|career|all[- ]time|greatest|goat|best season|back in|in his day|era|eras|hypothetical|who would win|would (?:win|beat)|vs\.?|versus|compare[ds]?|comparison|legacy|hall of fame|rookie (?:year|season)|retired|legend|(?:19[4-9]\d|20[0-2]\d)(?:-\d\d)?|'\d\d)\b/i;
+
+/** A player's career in a few lines: years, teams, averages, best stretch, honors. */
+export async function careerCard(p: IndexedPlayer, cache: Cache): Promise<Card | null> {
+  const c = await history.fetchCareer(p.pid, p.name, !p.retired, cache).catch(() => null);
+  return c ? { label: `${c.name} (career)`, text: history.careerSummary(c) } : null;
+}
+
+/** Data for players an answer names that the question didn't bring up: the
+ *  current card for active players, the career for everyone else. */
+export async function namedPlayerData(players: IndexedPlayer[], cache: Cache): Promise<string> {
+  const injuries = await news.injuries(cache).catch(() => ({}) as Record<string, news.InjuryRow[]>);
+  const cards = await Promise.all(
+    players.slice(0, 4).map((p) => (p.retired || !p.row ? careerCard(p, cache) : playerCard(p, injuries, cache, true)).catch(() => null)),
+  );
+  return cards.flatMap((c) => (c ? [c.text] : [])).join("\n\n");
 }
 
 async function teamCard(t: Team, cache: Cache, injuries: Record<string, news.InjuryRow[]>): Promise<Card> {
@@ -302,10 +331,12 @@ export async function ground(
 
   const settled = await Promise.allSettled([
     ...dates.map((d) => dateCard(d)),
-    ...players.map((p, i) => playerCard(p, idx, injuries, cache, i < 3)),
+    // retired players get their career; active ones their season, plus the career when the question reaches back
+    ...players.map((p, i) => (p.retired ? careerCard(p, cache) : playerCard(p, injuries, cache, i < 3))),
+    ...(HISTORY.test(subject) ? players.filter((p) => !p.retired).slice(0, 3).map((p) => careerCard(p, cache)) : []),
     ...teamList.map((t) => teamCard(t, cache, injuries)),
   ]);
-  const cards = settled.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
+  const cards = settled.flatMap((r) => (r.status === "fulfilled" && r.value ? [r.value] : []));
   // The followed team's card is reserved first; the rest fill in by order of mention.
   const followedCard = followed ? cards.find((c) => c.label === followed.nickname) : undefined;
   const kept: Card[] = [];

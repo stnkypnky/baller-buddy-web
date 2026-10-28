@@ -45,8 +45,9 @@ describe("finding what a question is about", () => {
     // everyday words count only when capitalized
     expect(idx.find("that was a smart play")).toEqual([]);
     expect(idx.find("is Smart still in Boston?").map((p) => p.name)).toEqual(["Marcus Smart"]);
-    // retired players aren't in the index
-    expect(idx.find("Larry Bird")).toEqual([]);
+    // legends are found by full name or nickname, marked retired
+    expect(idx.find("prime Larry Bird vs prime LeBron").map((p) => [p.name, !!p.retired])).toEqual([["Larry Bird", true]]);
+    expect(idx.find("Larry Legend").map((p) => p.name)).toEqual(["Larry Bird"]);
   });
 
   it("finds dates on the NBA calendar, not shooting lines", () => {
