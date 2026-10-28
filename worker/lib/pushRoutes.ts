@@ -6,7 +6,6 @@ import { json, loadSubs, saveSubs, sendPush, subId, type PushEnv, type Subscribe
 
 const BOOL_KEYS = ["enabled", "tipoff", "close", "final", "upset"] as const;
 const HHMM = /^(\d{2}:\d{2})?$/;
-const MAX_DEVICES = 50;
 
 const body = (request: Request) => request.json().catch(() => null) as Promise<any>;
 
@@ -64,7 +63,6 @@ export async function pushSubscribe(request: Request, env: PushEnv) {
   // Skip the KV write when nothing changed (KV writes are rationed).
   const same = prev && JSON.stringify({ ...prev, updated: 0 }) === JSON.stringify({ ...next, updated: 0 });
   if (!same) {
-    if (!prev && Object.keys(subs).length >= MAX_DEVICES) return json({ error: "too many devices" }, 429);
     subs[id] = { ...next, updated: Date.now() };
     await saveSubs(env, subs);
   }

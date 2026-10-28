@@ -71,8 +71,8 @@ One Worker serves the app, the API routes and the alerts cron. The site is
 public, like a GitHub Pages site: anyone with the link can open it. What
 stays protected:
 
-- **Alerts sign-up needs a passcode** (`PUSH_PASSCODE`), so strangers can't fill
-  the 50 device slots or use up the day's KV writes.
+- **Alerts sign-up needs a passcode** (`PUSH_PASSCODE`), so strangers can't sign
+  devices up or use up the day's KV writes. There's no cap on devices.
 - **The data proxy and AI relay refuse calls from other websites** and only reach
   an allowlist of hosts (NBA, ESPN, news feeds, search, AI providers).
 - **AI keys never leave each browser.** On Cloudflare's free plan, going over a
