@@ -47,21 +47,114 @@ export async function nextGame(teamId: number, cache: Cache) {
   return null;
 }
 
+// ── Tonight's finals ─────────────────────────────────────────────────────────
+// ESPN marks a game Final within minutes; nba.com's logs can take an hour or
+// more, and they're cached for hours. These fill the gap.
+
+const GAME_LENGTH = 2.5 * 3600; // tip-off to final buzzer, roughly
+const RECHECK_PENDING = 20 * 60; // how often to ask nba.com again while a final is missing
+
+/** When a final ended (epoch seconds), at the latest now. */
+const endedAt = (f: data.RecentFinal) => Math.min(Date.now() / 1000, Date.parse(f.date_utc) / 1000 + GAME_LENGTH);
+
+/** ESPN finals for the current season, or none (past seasons, ESPN down). */
+async function recentFinals(season: string, teamId?: number) {
+  if (season !== currentSeason()) return [];
+  const all = await data.fetchRecentFinals().catch(() => [] as data.RecentFinal[]);
+  return teamId ? all.filter((f) => f.home.nba_id === teamId || f.away.nba_id === teamId) : all;
+}
+
+/** Drop cached keys when they were written before a final they should contain
+ *  ended, or when a final is still missing and they're older than a recheck. */
+async function expireForFinals(cache: Cache, probe: string, finals: data.RecentFinal[], missing: boolean, drop: (k: string) => boolean) {
+  const age = await cache.age(probe);
+  if (age === null || !finals.length) return false;
+  const written = Date.now() / 1000 - age;
+  if (finals.some((f) => endedAt(f) > written) || (missing && age > RECHECK_PENDING)) {
+    await cache.popWhere(drop);
+    return true;
+  }
+  return false;
+}
+
+const playoffFinal = (f: data.RecentFinal) => f.stype === 3;
+const countedFinal = (f: data.RecentFinal) => f.stype === 2 || f.stype === 3;
+
+/** A team's game row built from an ESPN final, until nba.com has the real one. */
+function pendingTeamGame(f: data.RecentFinal, teamId: number) {
+  const home = f.home.nba_id === teamId;
+  const me = home ? f.home : f.away;
+  const opp = home ? f.away : f.home;
+  return {
+    game_id: `espn_${f.espn_id}`,
+    iso: f.iso,
+    date: data.fmtGameDate(f.iso),
+    matchup: `${me.abbr} ${home ? "vs." : "@"} ${opp.abbr}`,
+    wl: me.pts > opp.pts ? "W" : "L",
+    pts: me.pts,
+    reb: null,
+    ast: null,
+    fg_pct: null,
+    plus_minus: me.pts - opp.pts,
+    pending: true,
+    espn_id: f.espn_id,
+  };
+}
+
+const inTeamLog = (games: data.TeamGame[], f: data.RecentFinal, teamId: number) => {
+  const opp = f.home.nba_id === teamId ? f.away.abbr : f.home.abbr;
+  return games.some((g) => g.iso === f.iso && g.matchup.split(/\s+/).at(-1) === opp);
+};
+
 export async function teamOverview(teamId: number, season: string, cache: Cache) {
-  const standings = await data.fetchStandings(teamId, season, cache);
-  const [reg, po, full] = await teamDashboards(teamId, season, cache);
-  const gamesReg = await data.fetchGamelog(teamId, season, cache, 0);
+  const finals = (await recentFinals(season, teamId)).filter(countedFinal);
+  const teamKeys = (k: string) =>
+    k === `standings_all_${season}` || k.startsWith(`games_v3_${teamId}_${season}_`) || k.startsWith(`dashboard_v2_${teamId}_${season}_`);
+  const regKey = `games_v3_${teamId}_${season}_${SEASON_TYPE_REGULAR}`;
+  await expireForFinals(cache, regKey, finals, false, teamKeys);
+
+  let standings = await data.fetchStandings(teamId, season, cache);
+  let [reg, po, full] = await teamDashboards(teamId, season, cache);
+  let gamesReg = await data.fetchGamelog(teamId, season, cache, 0);
   // only hit the API for playoff games if the team has any
-  const gamesPo = data.hasDash(po) ? await data.fetchGamelog(teamId, season, cache, 0, SEASON_TYPE_PLAYOFFS) : [];
+  let gamesPo = data.hasDash(po) ? await data.fetchGamelog(teamId, season, cache, 0, SEASON_TYPE_PLAYOFFS) : [];
+  const missing = () => finals.filter((f) => !inTeamLog(playoffFinal(f) ? gamesPo : gamesReg, f, teamId));
+  // A final nba.com didn't have last time: ask again every so often.
+  if (missing().length && (await expireForFinals(cache, regKey, finals, true, teamKeys))) {
+    standings = await data.fetchStandings(teamId, season, cache);
+    [reg, po, full] = await teamDashboards(teamId, season, cache);
+    gamesReg = await data.fetchGamelog(teamId, season, cache, 0);
+    gamesPo = data.hasDash(po) ? await data.fetchGamelog(teamId, season, cache, 0, SEASON_TYPE_PLAYOFFS) : [];
+  }
+
+  // Still missing: show ESPN's version on top, newest first.
+  const add = missing().sort((a, b) => b.date_utc.localeCompare(a.date_utc));
+  const regular = [...add.filter((f) => !playoffFinal(f)).map((f) => pendingTeamGame(f, teamId)), ...gamesReg];
+  const playoffs = [...add.filter(playoffFinal).map((f) => pendingTeamGame(f, teamId)), ...gamesPo];
+
+  // ESPN's record counts tonight's game before nba.com's standings do.
+  const latest = finals.filter((f) => !playoffFinal(f)).sort((a, b) => b.date_utc.localeCompare(a.date_utc))[0];
+  const espnRec = latest && record(latest.home.nba_id === teamId ? latest.home.record : latest.away.record);
+  if (espnRec && "wins" in standings && espnRec[0] + espnRec[1] > (standings.wins as number) + (standings.losses as number)) {
+    const [w, l] = espnRec;
+    standings = { ...standings, wins: w, losses: l, win_pct: w / Math.max(w + l, 1) } as typeof standings;
+  }
+
   return {
     team_id: teamId,
     team_name: getTeamName(teamId),
     season,
     standings,
     dash: { regular: publicDash(reg), playoffs: publicDash(po), full: publicDash(full) },
-    games: { regular: gamesReg, playoffs: gamesPo },
+    games: { regular, playoffs },
     next_game: season === currentSeason() ? await nextGame(teamId, cache) : null,
   };
+}
+
+/** "45-12" -> [45, 12]. */
+function record(s: string): [number, number] | null {
+  const m = /^(\d+)-(\d+)/.exec(s ?? "");
+  return m ? [Number(m[1]), Number(m[2])] : null;
 }
 
 /** "Luka Dončić" / "Jaren Jackson Jr." -> "lukadoncic" / "jarenjackson", so
@@ -167,10 +260,36 @@ export async function playerLeaders(season: string, cache: Cache, rookies = fals
 }
 
 export async function scores(season: string, cache: Cache) {
-  const reg = await data.fetchLeagueScoreboard(season, cache, SEASON_TYPE_REGULAR);
-  const po = playoffsPossible(season) ? await data.fetchLeagueScoreboard(season, cache, SEASON_TYPE_PLAYOFFS) : [];
+  const finals = (await recentFinals(season)).filter(countedFinal);
+  const key = (t: string) => `lgl_v2_${season}_${t}`;
+  const leagueKeys = (k: string) => k.startsWith(`lgl_v2_${season}_`);
+  const inLog = (games: data.LeagueGame[], f: data.RecentFinal) => games.some((g) => g.date === f.iso && g.home?.team_id === f.home.nba_id);
+  const load = async () => [
+    await data.fetchLeagueScoreboard(season, cache, SEASON_TYPE_REGULAR),
+    playoffsPossible(season) ? await data.fetchLeagueScoreboard(season, cache, SEASON_TYPE_PLAYOFFS) : [],
+  ];
+  await expireForFinals(cache, key(SEASON_TYPE_REGULAR), finals, false, leagueKeys);
+  let [reg, po] = await load();
+  const missing = () => finals.filter((f) => !inLog(playoffFinal(f) ? po : reg, f));
+  if (missing().length && (await expireForFinals(cache, key(SEASON_TYPE_REGULAR), finals, true, leagueKeys))) [reg, po] = await load();
+
+  // Finals nba.com hasn't logged yet, from ESPN (newest first, like the log).
+  const pending = (f: data.RecentFinal) => ({
+    game_id: `espn_${f.espn_id}`,
+    date: f.iso,
+    ot: f.period > 4,
+    home: { team_id: f.home.nba_id, abbr: f.home.abbr, pts: f.home.pts },
+    away: { team_id: f.away.nba_id, abbr: f.away.abbr, pts: f.away.pts },
+    pending: true,
+    espn_id: f.espn_id,
+  });
+  const byNewest = (a: { date: string; game_id: string }, b: { date: string; game_id: string }) =>
+    a.date === b.date ? b.game_id.localeCompare(a.game_id) : b.date.localeCompare(a.date);
+  const add = missing();
+  const regular = [...add.filter((f) => !playoffFinal(f)).map(pending), ...reg].sort(byNewest);
+  const playoffs = [...add.filter(playoffFinal).map(pending), ...po].sort(byNewest);
   const upcoming = season === currentSeason() ? await data.fetchUpcomingGames(cache) : [];
-  return { season, regular: reg, playoffs: po, upcoming };
+  return { season, regular, playoffs, upcoming };
 }
 
 // ── Compare ──────────────────────────────────────────────────────────────────

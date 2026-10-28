@@ -20,7 +20,7 @@ import {
 } from "../config";
 import { getJson, getText } from "../http";
 import { columns, dashParams, int, num, numOrNull, resultSet, round, statsGet, str, type Row } from "./stats";
-import { ESPN_ID_TO_NAME, ESPN_IDS, getTeamName } from "./teams";
+import { ESPN_ID_TO_NAME, ESPN_IDS, getTeamAbbr, getTeamId, getTeamName } from "./teams";
 
 // League leaderboard categories: [label, measure_type, field, higher_is_better, format, definition].
 // measure_type selects which single league-wide fetch the field comes from.
@@ -1021,6 +1021,8 @@ export interface LiveGame {
   period: number;
   clock: string;
   broadcast: string;
+  /** ESPN season type: 1 preseason, 2 regular, 3 playoffs, 5 play-in. */
+  stype: number;
   home: EspnSide;
   away: EspnSide;
 }
@@ -1044,6 +1046,7 @@ export function parseScoreboard(j: any) {
         period: int(status.period),
         clock: status.displayClock ?? "",
         broadcast: (comp.broadcasts ?? []).flatMap((b: any) => b.names ?? []).join(", "),
+        stype: int(ev.season?.type, 2),
         home: espnSide(home),
         away: espnSide(away),
       });
@@ -1058,6 +1061,57 @@ export type Scoreboard = ReturnType<typeof parseScoreboard>;
 /** Today's (or `date` YYYYMMDD) NBA slate from ESPN. Never cached. */
 export async function fetchScoreboard(date?: string | null): Promise<Scoreboard> {
   return parseScoreboard(await getJson(ESPN_SCOREBOARD_URL, { params: { dates: date || nbaToday() }, timeout: 15 }));
+}
+
+// ── Recent finals (ESPN is minutes behind a final; nba.com's logs can be hours) ──
+
+export interface FinalSide {
+  nba_id: number;
+  abbr: string; // nba.com tricode, as in MATCHUP strings
+  pts: number;
+  record: string;
+}
+
+export interface RecentFinal {
+  espn_id: string;
+  /** The game's date on the NBA's Eastern calendar (YYYY-MM-DD), like nba.com logs. */
+  iso: string;
+  date_utc: string;
+  stype: number;
+  period: number;
+  home: FinalSide;
+  away: FinalSide;
+}
+
+const finalsMemo = new Memo<RecentFinal[]>(2);
+
+/** Tests start each case without the minute-long memo. */
+export const clearRecentFinals = () => finalsMemo.set("recent", [], -1);
+
+const yyyymmddToIso = (d: string) => `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}`;
+
+/** Games ESPN has as Final on the NBA's today and yesterday. Held for a minute so
+ *  Overview, Scores and the Live poll share the calls. */
+export async function fetchRecentFinals(now = new Date()): Promise<RecentFinal[]> {
+  const hit = finalsMemo.get("recent");
+  if (hit) return hit;
+  const days = [nbaToday(now), nbaToday(new Date(now.getTime() - 86400_000))];
+  const boards = await Promise.all(days.map((d) => fetchScoreboard(d)));
+  const out: RecentFinal[] = [];
+  boards.forEach((b, i) => {
+    for (const g of b.games) {
+      if (g.state !== "post") continue;
+      const side = (s: EspnSide): FinalSide | null => {
+        const id = getTeamId(ESPN_ID_TO_NAME[s.espn_id] ?? "");
+        return id ? { nba_id: id, abbr: getTeamAbbr(id), pts: int(s.score), record: s.record } : null;
+      };
+      const home = side(g.home);
+      const away = side(g.away);
+      if (home && away) out.push({ espn_id: g.id, iso: yyyymmddToIso(days[i]), date_utc: g.date_utc, stype: g.stype, period: g.period, home, away });
+    }
+  });
+  finalsMemo.set("recent", out, 60);
+  return out;
 }
 
 /** Raw ESPN game summary (box score, plays, win probability). Held a few

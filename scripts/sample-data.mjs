@@ -146,7 +146,7 @@ function espnTeam(abbr) {
 function scoreboard(url) {
   const date = qs(url).get("dates");
   const today = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(new Date()).replaceAll("-", "");
-  const pairs = [["LAL", "BOS", "in", 4, "3:12"], ["NY", "MIA", "post", 4, "0:00"], ["GS", "DEN", "pre", 0, ""], ["PHI", "MIL", "in", 2, "5:40"], ["OKC", "DAL", "pre", 0, ""]];
+  const pairs = [["LAL", "BOS", "post", 4, "0:00"], ["NY", "MIA", "post", 4, "0:00"], ["GS", "DEN", "pre", 0, ""], ["PHI", "MIL", "in", 2, "5:40"], ["OKC", "DAL", "pre", 0, ""]];
   const events = pairs.map(([a, h, state, period, clock], i) => ({
     id: String(401700100 + i),
     date: new Date(Date.now() + (state === "pre" ? (i + 2) * 3600e3 : -2 * 3600e3)).toISOString().replace(/\.\d+Z$/, "Z"),

@@ -1,6 +1,7 @@
 import { CalendarClock, Flame, Snowflake } from "lucide-react";
 import { motion } from "motion/react";
 import { useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { GameStoryDrawer, type StoryTarget } from "../components/GameStory";
 import {
   AnimatedNumber,
@@ -355,6 +356,8 @@ function FormStrip({ games, loading }: { games: TeamGame[]; loading: boolean }) 
 
 function GamesTable({ games, onOpen }: { games: TeamGame[]; onOpen: (t: StoryTarget) => void }) {
   const sel = useSelection();
+  const navigate = useNavigate();
+  const stat = (v: number | null, digits = 0) => (v == null ? "—" : v.toFixed(digits));
   return (
     // Phones scroll the table sideways rather than drop columns.
     <div className="max-sm:-mx-5 max-sm:overflow-x-auto max-sm:px-5">
@@ -379,7 +382,7 @@ function GamesTable({ games, onOpen }: { games: TeamGame[]; onOpen: (t: StoryTar
           return (
             <tr
               key={g.game_id}
-              onClick={() => onOpen({ gameId: g.game_id, title: g.matchup, subtitle: g.date })}
+              onClick={() => (g.pending ? navigate(`/pulse/${g.espn_id}`) : onOpen({ gameId: g.game_id, title: g.matchup, subtitle: g.date }))}
               className="group cursor-pointer border-t border-line/60 transition-colors hover:bg-white/[0.035]"
             >
               <td className="py-2.5 text-muted">{g.date}</td>
@@ -392,11 +395,16 @@ function GamesTable({ games, onOpen }: { games: TeamGame[]; onOpen: (t: StoryTar
               </td>
               <td className="py-2.5 text-center">
                 <WL wl={g.wl} />
+                {g.pending && (
+                  <span className="ml-1.5 rounded bg-white/10 px-1.5 py-0.5 align-middle text-[10px] font-semibold text-muted" title="Final on ESPN; nba.com's box score comes later">
+                    box score soon
+                  </span>
+                )}
               </td>
               <td className="py-2.5 text-right font-semibold">{g.pts}</td>
-              <td className="py-2.5 text-right text-fg/80">{g.reb}</td>
-              <td className="py-2.5 text-right text-fg/80">{g.ast}</td>
-              <td className="py-2.5 text-right text-fg/80">{g.fg_pct.toFixed(1)}</td>
+              <td className="py-2.5 text-right text-fg/80">{stat(g.reb)}</td>
+              <td className="py-2.5 text-right text-fg/80">{stat(g.ast)}</td>
+              <td className="py-2.5 text-right text-fg/80">{stat(g.fg_pct, 1)}</td>
               <td className={cx("py-2.5 text-right font-semibold", g.plus_minus > 0 ? "text-win" : g.plus_minus < 0 ? "text-loss" : "text-muted")}>
                 {g.plus_minus > 0 ? "+" : ""}
                 {g.plus_minus}

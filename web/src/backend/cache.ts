@@ -108,6 +108,12 @@ export class Cache {
     return e.data as T;
   }
 
+  /** Seconds since `key` was written, or null when it isn't cached. */
+  async age(key: string): Promise<number | null> {
+    const e = await this.entry(key);
+    return e ? now() - (e.ts ?? 0) : null;
+  }
+
   async set(key: string, data: unknown) {
     const e = { ts: now(), data };
     this.mem.set(key, e);

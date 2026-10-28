@@ -1,4 +1,5 @@
 import * as Switch from "@radix-ui/react-switch";
+import { useNavigate } from "react-router-dom";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { CalendarDays, Search } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
@@ -187,6 +188,7 @@ function GameList({ rows, myAbbr, onOpen }: { rows: Row[]; myAbbr?: string; onOp
 
 function ScoreRow({ g, myAbbr, onOpen }: { g: ScoreGame; myAbbr?: string; onOpen: (t: StoryTarget) => void }) {
   const sel = useSelection();
+  const navigate = useNavigate();
   const away = sel.byAbbr.get(g.away.abbr);
   const home = sel.byAbbr.get(g.home.abbr);
   const awayWon = g.away.pts > g.home.pts;
@@ -195,10 +197,13 @@ function ScoreRow({ g, myAbbr, onOpen }: { g: ScoreGame; myAbbr?: string; onOpen
   return (
     <button
       onClick={() =>
-        onOpen({ gameId: g.game_id, title: `${g.away.abbr} @ ${g.home.abbr}`, subtitle: `${shortDate(g.date, true)}${g.ot ? " · OT" : ""}` })
+        // A final nba.com hasn't logged yet has no Game Story; Game Pulse (ESPN) has it.
+        g.pending
+          ? navigate(`/pulse/${g.espn_id}`)
+          : onOpen({ gameId: g.game_id, title: `${g.away.abbr} @ ${g.home.abbr}`, subtitle: `${shortDate(g.date, true)}${g.ot ? " · OT" : ""}` })
       }
       className={cx(
-        "mx-1 grid h-[52px] w-[calc(100%-0.5rem)] grid-cols-[1fr_auto_1fr_120px] items-center gap-4 rounded-xl px-4 text-left transition-colors hover:bg-white/[0.045] max-sm:grid-cols-[1fr_auto_1fr_auto] max-sm:gap-2 max-sm:px-2",
+        "mx-1 grid h-[52px] w-[calc(100%-0.5rem)] grid-cols-[1fr_auto_1fr_minmax(120px,auto)] items-center gap-4 rounded-xl px-4 text-left transition-colors hover:bg-white/[0.045] max-sm:grid-cols-[1fr_auto_1fr_auto] max-sm:gap-2 max-sm:px-2",
         mine && "bg-team/10 ring-1 ring-team-text/25",
       )}
     >
@@ -221,8 +226,9 @@ function ScoreRow({ g, myAbbr, onOpen }: { g: ScoreGame; myAbbr?: string; onOpen
           <span className="sm:hidden">{g.home.abbr}</span>
         </span>
       </div>
-      <div className="flex justify-end gap-1.5 text-[10px] font-semibold uppercase tracking-wider max-sm:flex-col max-sm:items-end max-sm:gap-0.5">
+      <div className="flex justify-end gap-1.5 whitespace-nowrap text-[10px] font-semibold uppercase tracking-wider max-sm:flex-col max-sm:items-end max-sm:gap-0.5">
         {g.ot && <span className="rounded bg-warn/15 px-1.5 py-0.5 text-warn">OT</span>}
+        {g.pending && <span className="rounded bg-white/10 px-1.5 py-0.5 text-muted" title="Final on ESPN; nba.com's box score comes later">Box score soon</span>}
         {margin <= 3 && <span className="rounded bg-white/10 px-1.5 py-0.5 text-fg/80">Thriller</span>}
         {margin >= 25 && <span className="rounded bg-white/5 px-1.5 py-0.5 text-muted">Blowout</span>}
       </div>

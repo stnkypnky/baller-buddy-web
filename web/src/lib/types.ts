@@ -86,10 +86,13 @@ export interface TeamGame {
   matchup: string;
   wl: string;
   pts: number;
-  reb: number;
-  ast: number;
-  fg_pct: number;
+  /** null while the game is pending (ESPN final, not yet in nba.com's log) */
+  reb: number | null;
+  ast: number | null;
+  fg_pct: number | null;
   plus_minus: number;
+  pending?: boolean;
+  espn_id?: string;
 }
 
 export interface EspnSide {
@@ -262,6 +265,9 @@ export interface ScoreGame {
   ot: boolean;
   home: { team_id: number; abbr: string; pts: number };
   away: { team_id: number; abbr: string; pts: number };
+  /** ESPN has it as Final, nba.com hasn't logged it yet: open Game Pulse instead */
+  pending?: boolean;
+  espn_id?: string;
 }
 
 export interface Scores {
