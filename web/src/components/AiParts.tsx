@@ -248,14 +248,14 @@ function FactCheckBadge({ turn }: { turn: Turn }) {
   if (f.unresolved) {
     return (
       <span className="ml-1 inline-flex items-center gap-1 text-warn" title={`Couldn't confirm: ${f.names.join(", ")}`}>
-        <ShieldAlert className="size-3.5" /> Couldn't confirm {f.names.length} player{f.names.length === 1 ? "" : "s"}
+        <ShieldAlert className="size-3.5" /> Couldn't confirm {f.names.length} detail{f.names.length === 1 ? "" : "s"}
       </span>
     );
   }
   return (
     <span
       className="ml-1 inline-flex items-center gap-1 text-win/90"
-      title={f.fixed ? `Corrected: ${f.names.join(", ")}` : f.checked ? `Every player named was checked against current data` : "No players named"}
+      title={f.fixed ? `Corrected: ${f.names.join(", ")}` : f.checked ? `${f.checked} players and numbers checked against current data` : "Nothing to check"}
     >
       <ShieldCheck className="size-3.5" /> Fact-checked{f.fixed ? ` · fixed ${f.fixed}` : ""}
     </span>

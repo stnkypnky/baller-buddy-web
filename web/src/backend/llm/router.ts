@@ -13,7 +13,7 @@ import { findTeam, getTeamName } from "../nba/teams";
 import * as pulse from "../pulse";
 import * as settings from "../settings";
 import * as anthropicAdapter from "./anthropicAdapter";
-import { checkAnswer, correctionSheet } from "./factcheck";
+import { checkAnswer, correctionSheet, issueCount, type CheckOptions } from "./factcheck";
 import { ground, playerIndex, shiftDay, type PlayerIndex } from "./grounding";
 import * as openaiAdapter from "./openaiAdapter";
 import { ToolsUnsupported, type ChatMessage } from "./openaiAdapter";
@@ -231,15 +231,17 @@ async function* factCheck(
   idx: PlayerIndex,
   run: (history: ChatMessage[]) => AsyncGenerator<{ type: string; text?: string }>,
   history: ChatMessage[],
+  opts: CheckOptions = {},
 ): AsyncGenerator<SseEvent> {
   yield sse("status", { text: "Checking facts…" });
-  const res = checkAnswer(draft, dataText, idx);
-  const names = res.problems.map((p) => p.player.name);
-  if (!res.problems.length) {
-    yield sse("factcheck", { checked: res.named.length, fixed: 0, names: [] });
+  const res = checkAnswer(draft, dataText, idx, opts);
+  const checked = res.named.length + res.numbers;
+  const names = [...res.problems.map((p) => p.player.name), ...res.claims.map((c) => c.text)];
+  if (!issueCount(res)) {
+    yield sse("factcheck", { checked, fixed: 0, names: [] });
     return;
   }
-  const revised: ChatMessage[] = [...history, { role: "assistant", content: draft }, { role: "user", content: correctionSheet(res.problems) }];
+  const revised: ChatMessage[] = [...history, { role: "assistant", content: draft }, { role: "user", content: correctionSheet(res.problems, res.claims) }];
   let started = false;
   let text = "";
   try {
@@ -258,10 +260,10 @@ async function* factCheck(
   if (!started || !text.trim()) {
     // No usable rewrite: keep the draft, say what couldn't be confirmed.
     if (started) yield sse("revision_restore", { text: draft });
-    yield sse("factcheck", { checked: res.named.length, fixed: 0, names, unresolved: true });
+    yield sse("factcheck", { checked, fixed: 0, names, unresolved: true });
     return;
   }
-  yield sse("factcheck", { checked: res.named.length, fixed: res.problems.length, names });
+  yield sse("factcheck", { checked, fixed: issueCount(res), names });
 }
 
 async function chain(req: ChatRequest): Promise<[string, string][]> {
@@ -446,8 +448,15 @@ export async function* chatEvents(req: ChatRequest, cache: Cache, signal?: Abort
           if (ev.type === "token") draft += ev.text;
           yield sse(ev.type, ev);
         }
-        if (mode === "chat" && idx && ai.factcheck !== false && draft.trim() && !draft.includes(OFF_TOPIC_REPLY)) {
-          yield* factCheck(draft, [system, dataText, ...toolTexts].join("\n"), idx, (h) => adapter(pid)(pid, model, system, h, null, toolRunner(pid), signal), history);
+        if (ai.factcheck !== false && draft.trim() && !draft.includes(OFF_TOPIC_REPLY)) {
+          // Chat answers are checked against their fact cards and tool results;
+          // one-shots (catch me up, matchup, news brief) against their own data.
+          // A brief's headlines can be newer than the stats, so its team ties aren't checked.
+          const facts = [system, dataText, req.context ?? "", ...toolTexts].join("\n");
+          const index = idx ?? (await playerIndex(cache).catch(() => null));
+          if (index) {
+            yield* factCheck(draft, facts, index, (h) => adapter(pid)(pid, model, system, h, null, toolRunner(pid), signal), history, { teams: mode !== "brief" });
+          }
         }
         if (mode === "chat") yield sse("digest", { text: digest(cardText, toolTexts) });
         yield sse("done", { provider: pid, model });

@@ -337,7 +337,7 @@ function Fallbacks() {
           checked={data.settings.factcheck !== false}
           onChange={(v) => put("/ai/settings", { factcheck: v }).then(() => qc.invalidateQueries({ queryKey: ["ai-providers"] }))}
           label="Fact-check answers"
-          hint="Checks every player an answer names against this season's data, and has the model fix any mix-ups. Adds a second pass only when something's off."
+          hint="Checks the players, scores, records and stats in every answer against the data it was built from, and has the model fix anything unsupported. Adds a second pass only when something's off."
         />
       </div>
       {!!data.settings.no_tools.length && (

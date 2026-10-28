@@ -212,3 +212,99 @@ describe("a chat turn", () => {
     expect(sys).toContain("Your training knowledge of rosters, trades, injuries and results is out of date");
   });
 });
+
+describe("fact-check: scores and stats", () => {
+  const data = [
+    "GAMES ON 2026-10-27:",
+    "- FINAL: BKN 110 @ DEN 112 (close) · BKN: Michael Porter Jr. 31 pts, Nic Claxton 12 reb",
+    "TEAM Boston Celtics 2026-27 · record 3-1 · East #2",
+    "ROSTER: Jayson Tatum F 27.1 ppg, Paul George F 18.4 ppg",
+    "PLAYER Paul George — plays for Boston Celtics (BOS) in 2026-27 · 5 GP · 18.4 pts, 5.0 reb, 4.0 ast, 32.0 min, FG 47.0%, 3P 37.0%",
+    '[get_game_details] {"home":{"abbr":"BOS","score":125},"away":{"abbr":"LAL","score":124},"fg_pct":0.471}',
+  ].join("\n");
+  const check = (answer: string) => checkAnswer(answer, data, idx);
+
+  it("passes numbers the data backs, at the answer's own precision", () => {
+    const r = check(
+      "Denver edged Brooklyn 112-110 as Porter Jr. scored 31 points. The Celtics are 3-1, George is averaging 18 points on 47% shooting, " +
+        "and Boston beat the Lakers 125-124 shooting 47.1%.",
+    );
+    expect(r.claims).toEqual([]);
+    expect(r.problems).toEqual([]);
+    expect(r.numbers).toBeGreaterThanOrEqual(6);
+  });
+
+  it("flags a score no game in the data has, with the real line as a hint", () => {
+    const r = check("Denver won 118-110 over the Nets.");
+    expect(r.claims).toHaveLength(1);
+    expect(r.claims[0]).toMatchObject({ kind: "score", text: "118-110" });
+    expect(r.claims[0].hint).toContain("BKN 110 @ DEN 112");
+  });
+
+  it("checks a stat against the right player, not any number in the data", () => {
+    // 27 is in the data, but it's Tatum's, not George's
+    const r = check("Paul George is averaging 27 points a night.");
+    expect(r.claims.map((c) => c.text)).toEqual(["Paul George: 27 points"]);
+    expect(r.claims[0].hint).toContain("18.4 pts");
+    expect(check("Porter Jr. scored 38 points.").claims.map((c) => c.text)).toEqual(["Michael Porter Jr.: 38 points"]);
+  });
+
+  it("flags made-up ratings, percentages and records, not seasons, dates or times", () => {
+    expect(check("Boston's net rating is +9.2 and they're 4-0.").claims.map((c) => [c.kind, c.text])).toEqual([
+      ["pair", "4-0"],
+      ["number", "+9.2"],
+    ]);
+    expect(check("In 2026-27, on 10/27 at 7:30, they tipped off.").claims).toEqual([]);
+  });
+
+  it("lists number problems on the correction sheet", () => {
+    const r = check("Denver won 118-110.");
+    expect(correctionSheet(r.problems, r.claims)).toContain('"118-110" (score) isn\'t in the data. The data says:');
+  });
+});
+
+describe("fact-check beyond the chat", () => {
+  const sent: any[] = [];
+  let replies: string[] = [];
+  beforeEach(async () => {
+    nba();
+    sent.length = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_u: string, init: RequestInit) => {
+        sent.push(JSON.parse(String(init.body)));
+        return new Response(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: replies[sent.length - 1] ?? "ok" } }] })}\n\ndata: [DONE]\n\n`, {
+          headers: { "content-type": "text/event-stream" },
+        });
+      }),
+    );
+    await settings.update("ai", { custom_base_url: "http://mock.local/v1", provider: "custom", model: "m", fallbacks: [], no_tools: [], factcheck: true });
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  const run = async (req: router.ChatRequest) => {
+    const events: any[] = [];
+    for await (const e of router.chatEvents(req, new Cache({ persist: false }))) events.push(e);
+    return events;
+  };
+
+  it("checks Catch me up against its game data", async () => {
+    replies = ["Boston holds on, 118 to 100! Tatum's got 31!", "Boston holds on, 110 to 100!"];
+    const events = await run({ mode: "recap", context: "GAME: BKN at BOS\nSCORE: BKN 100 – BOS 110\nLEADERS: BOS points: Jayson Tatum 31" });
+    // "118 to 100" isn't checked as a pair (only dashes are), but Tatum's 31 is backed; nothing to fix
+    expect(events.find((e) => e.event === "factcheck").data.fixed).toBe(0);
+    replies = ["Boston won it 118-100 behind Tatum."];
+    sent.length = 0;
+    const ev2 = await run({ mode: "recap", context: "GAME: BKN at BOS\nSCORE: BKN 100 – BOS 110\nLEADERS: BOS points: Jayson Tatum 31" });
+    expect(sent).toHaveLength(2);
+    expect(sent[1].messages.at(-1).content).toContain('"118-100" (score)');
+    expect(ev2.find((e) => e.event === "factcheck").data).toMatchObject({ fixed: 1 });
+  });
+
+  it("doesn't second-guess a news brief's team moves", async () => {
+    replies = ["**Marcus Smart** signs with the Celtics."];
+    const events = await run({ mode: "brief", context: "HEADLINES:\n- Celtics sign Marcus Smart to a one-year deal" });
+    expect(sent).toHaveLength(1);
+    expect(events.find((e) => e.event === "factcheck").data.fixed).toBe(0);
+  });
+});

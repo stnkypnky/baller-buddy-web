@@ -159,7 +159,8 @@ describe("providers and router", () => {
   });
 
   it("falls back to a data snapshot when a model rejects tools", async () => {
-    await settings.update("ai", { provider: "custom", model: "no-tools-model" });
+    // (this mock's canned "0-1" isn't in any data, so leave the fact-check out of it)
+    await settings.update("ai", { provider: "custom", model: "no-tools-model", factcheck: false });
     const evs = await collect(router.chatEvents({ messages: [{ role: "user", content: "hi" }], mode: "chat" }, new Cache({ persist: false })));
     const kinds = evs.map((e) => e.event);
     expect(kinds).toContain("status");
