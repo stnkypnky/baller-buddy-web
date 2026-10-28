@@ -219,14 +219,16 @@ export async function absenceNotes(teamId: number, season: string, cache: Cache)
 
 /** buildContext() text for one team (AI fallback / tool output). */
 export async function teamContext(teamId: number, season: string, cache: Cache) {
+  // The overview's record and games include tonight's ESPN final.
+  const ov = await teamOverview(teamId, season, cache);
   const [reg, po, full] = await teamDashboards(teamId, season, cache);
   return data.buildContext(
     getTeamName(teamId),
-    await data.fetchStandings(teamId, season, cache),
+    ov.standings,
     reg,
     await data.fetchHistory(teamId, cache),
     await data.fetchRoster(teamId, season, cache),
-    await data.fetchGamelog(teamId, season, cache),
+    ov.games.regular as data.TeamGame[],
     po,
     full,
   );

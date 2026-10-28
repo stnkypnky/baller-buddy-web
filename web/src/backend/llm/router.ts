@@ -20,6 +20,22 @@ import * as tools from "./tools";
 
 const MAX_HISTORY = 24;
 const MAX_MSG_CHARS = 12000;
+/** Tool results for local models: small context windows. */
+const LOCAL_RESULT_CHARS = 4000;
+const TODAY_LINES = 15;
+
+export const OFF_TOPIC_REPLY = "I'm Baller Buddy's NBA analyst — ask me anything about the NBA.";
+
+const SCOPE_RULE =
+  "SCOPE: you only answer questions about the NBA — its teams, players, games, stats, standings, " +
+  "history, draft, trades, injuries, contracts, fantasy and betting angles on NBA games, and this app. " +
+  "Short follow-ups (\"and him?\", \"why?\") belong to the NBA conversation they continue. " +
+  "For anything else (other sports or leagues such as the WNBA, college or EuroLeague, coding, " +
+  "general knowledge, chit-chat, homework, writing tasks), call no tools and reply with exactly: " +
+  `"${OFF_TOPIC_REPLY}"`;
+
+/** Appended to the model's copy of the user's latest message (never shown). */
+const SCOPE_REMINDER = `\n\n(Reminder: answer only if this is about the NBA; otherwise reply exactly "${OFF_TOPIC_REPLY}")`;
 
 const BASE_PERSONA =
   "You are the AI analyst inside Baller Buddy, an NBA app — sharp, specific, " +
@@ -27,8 +43,9 @@ const BASE_PERSONA =
 
 const CHAT_RULES =
   "Ground every claim in data. Use your tools to fetch real stats (standings, team reports, " +
-  "rosters, players, team and player leaderboards, game logs, box scores, schedules, news, " +
-  "web search) instead of guessing, " +
+  "rosters, players, team and player leaderboards, game logs, live and finished games, schedules, " +
+  "injuries, news, trade rumors, web search) instead of guessing, " +
+  "and for a question about a team's game (\"how was the game tonight\") call get_game_details with that team. " +
   "and call several tools when a question needs it. Never invent numbers. " +
   "If one tool's data doesn't cover part of the question (a player's line, say), call the tool " +
   "that does; never tell the user to look it up or name a tool to them. " +
@@ -124,11 +141,24 @@ export async function buildSystem(req: ChatRequest, cache: Cache, withTools: boo
     }
     return `${persona}\n\n${MODE_PROMPTS[mode]}${extra}`;
   }
-  let sys = `${persona}\n\n${CHAT_RULES}${await viewLine(req.team_id, season, req.page, cache)}`;
+  let sys = `${persona}\n\n${SCOPE_RULE}\n\n${CHAT_RULES}${await viewLine(req.team_id, season, req.page, cache)}${await todayBlock()}`;
   if (!withTools && req.team_id) {
     sys += "\n\nYou have no live tools for this model; answer from this data snapshot:\n\n" + (await services.teamContext(req.team_id, season, cache));
   }
   return sys;
+}
+
+/** Today's slate, one line per game, so "the game tonight" needs no lookup. */
+async function todayBlock() {
+  const sb = await data.fetchScoreboard().catch(() => null);
+  if (!sb?.games.length) return "";
+  const line = (g: data.LiveGame) => {
+    const score = g.state === "pre" ? `${g.away.abbr} @ ${g.home.abbr}` : `${g.away.abbr} ${g.away.score} @ ${g.home.abbr} ${g.home.score}`;
+    const state = g.state === "post" ? "Final" : g.state === "in" ? `LIVE ${g.status_text}` : g.status_text;
+    return `- ${score} · ${state} · game_id espn_${g.id}`;
+  };
+  const lines = sb.games.slice(0, TODAY_LINES).map(line);
+  return `\n\nTODAY'S NBA GAMES (Eastern date ${sb.date.slice(0, 10) || data.nbaToday()}; scores as of this message, use get_game_details for more):\n${lines.join("\n")}`;
 }
 
 async function chain(req: ChatRequest): Promise<[string, string][]> {
@@ -211,7 +241,16 @@ export async function* chatEvents(req: ChatRequest, cache: Cache, signal?: Abort
     }
   }
 
-  const runTool = (name: string, args: Record<string, unknown>) => tools.execute(name, args, cache);
+  // Small models drift off topic more easily: remind them on the turn itself.
+  if (mode === "chat") {
+    const last = history.at(-1)!;
+    history[history.length - 1] = { ...last, content: last.content + SCOPE_REMINDER };
+  }
+
+  const toolRunner = (pid: string) => {
+    const limit = providers.get(pid).local ? LOCAL_RESULT_CHARS : tools.MAX_RESULT_CHARS;
+    return (name: string, args: Record<string, unknown>) => tools.execute(name, args, cache, limit);
+  };
 
   const ai = await settings.get("ai");
   const tried: string[] = [];
@@ -235,7 +274,7 @@ export async function* chatEvents(req: ChatRequest, cache: Cache, signal?: Abort
       try {
         const system = await buildSystem(req, cache, attemptTools);
         const specs = attemptTools ? tools.SPECS : null;
-        for await (const ev of adapter(pid)(pid, model, system, history, specs, runTool, signal)) {
+        for await (const ev of adapter(pid)(pid, model, system, history, specs, toolRunner(pid), signal)) {
           if (ev.type === "token" || ev.type === "reasoning" || ev.type === "tool_call") emitted = true;
           yield sse(ev.type, ev);
         }

@@ -220,12 +220,18 @@ export async function* stream(
       content: acc.text || null,
       tool_calls: calls.map((c) => ({ id: c.id, type: "function", function: { name: c.name, arguments: c.args } })),
     });
-    for (const c of calls) {
-      const args = parseArgs(c.args);
-      yield { type: "tool_call", id: c.id, name: c.name, args: args ?? {} };
-      let text: string, summary: string, ok: boolean;
-      if (args === null) [text, summary, ok] = [JSON.stringify({ error: "INVALID_JSON arguments" }), "Bad tool arguments", false];
-      else [text, summary, ok] = await runTool(c.name, args);
+    // Run this turn's calls together; report and return results in call order.
+    const parsed = calls.map((c) => ({ ...c, parsed: parseArgs(c.args) }));
+    for (const c of parsed) yield { type: "tool_call", id: c.id, name: c.name, args: c.parsed ?? {} };
+    const results = await Promise.all(
+      parsed.map((c) =>
+        c.parsed === null
+          ? Promise.resolve<[string, string, boolean]>([JSON.stringify({ error: "INVALID_JSON arguments" }), "Bad tool arguments", false])
+          : runTool(c.name, c.parsed),
+      ),
+    );
+    for (const [i, c] of parsed.entries()) {
+      const [text, summary, ok] = results[i];
       yield { type: "tool_result", id: c.id, name: c.name, summary, ok };
       messages.push({ role: "tool", tool_call_id: c.id, content: text });
     }

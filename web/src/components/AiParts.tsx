@@ -11,6 +11,7 @@ import {
   ClipboardList,
   Cpu,
   Globe,
+  HeartPulse,
   Medal,
   Newspaper,
   Radio,
@@ -47,6 +48,7 @@ const TOOL_ICONS: Record<string, ReactNode> = {
   get_league_leaders: <BarChart3 />,
   get_player_leaders: <Medal />,
   get_news: <Newspaper />,
+  get_injuries: <HeartPulse />,
   web_search: <Globe />,
 };
 

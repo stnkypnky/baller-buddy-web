@@ -100,18 +100,23 @@ export async function* stream(
     }
 
     messages.push({ role: "assistant", content: final.content });
+    const argsOf = (b: any) => (b.input && typeof b.input === "object" && !Array.isArray(b.input) ? b.input : {});
+    for (const b of toolUses) yield { type: "tool_call", id: b.id, name: b.name, args: argsOf(b) };
+    // Run this turn's calls together; report and return results in call order.
+    const outs = await Promise.all(
+      toolUses.map(async (b: any): Promise<[string, string, boolean]> => {
+        try {
+          validateArgs(b.name, argsOf(b));
+        } catch {
+          // tolerant parsing can hand back a truncated object: don't run it
+          return [JSON.stringify({ INVALID_JSON: JSON.stringify(b.input) }), "Bad tool arguments", false];
+        }
+        return runTool(b.name, argsOf(b));
+      }),
+    );
     const results: any[] = [];
-    for (const b of toolUses) {
-      const args = b.input && typeof b.input === "object" && !Array.isArray(b.input) ? b.input : {};
-      yield { type: "tool_call", id: b.id, name: b.name, args };
-      let text: string, summary: string, ok: boolean;
-      try {
-        validateArgs(b.name, args);
-        [text, summary, ok] = await runTool(b.name, args);
-      } catch {
-        // tolerant parsing can hand back a truncated object: don't run it
-        [text, summary, ok] = [JSON.stringify({ INVALID_JSON: JSON.stringify(b.input) }), "Bad tool arguments", false];
-      }
+    for (const [i, b] of toolUses.entries()) {
+      const [text, summary, ok] = outs[i];
       yield { type: "tool_result", id: b.id, name: b.name, summary, ok };
       results.push({ type: "tool_result", tool_use_id: b.id, content: text, is_error: !ok });
     }

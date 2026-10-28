@@ -4,13 +4,15 @@
 
 import type { Cache } from "../cache";
 import { currentSeason, parseSeasonType, SEASON_TYPE_FULL, SEASON_TYPE_PLAYOFFS } from "../config";
+import * as news from "../news";
 import * as data from "../nba/data";
 import * as services from "../nba/services";
 import { round } from "../nba/stats";
-import { findTeam, getTeamAbbr, getTeamName } from "../nba/teams";
+import { findTeam, getTeamAbbr, getTeamName, type Team } from "../nba/teams";
+import * as pulse from "../pulse";
 import { zoneSummary } from "./shotzones";
 
-const MAX_RESULT_CHARS = 9000;
+export const MAX_RESULT_CHARS = 9000;
 
 const SEASON = { type: "string", description: "Season like '2025-26'. Omit for the current season." };
 const STYPE = { type: "string", enum: ["regular", "playoffs", "full"], description: "Regular season, playoffs, or both combined. Default regular." };
@@ -38,7 +40,7 @@ export const SPECS: ToolSpec[] = [
   },
   {
     name: "get_team_games",
-    description: "A team's game log, newest first, with scores, +/- and NBA game_id (usable with get_game_details).",
+    description: "A team's game log, newest first, with scores, +/- and game_id (usable with get_game_details). Includes tonight's finished game even before nba.com logs it.",
     parameters: { type: "object", properties: {
       team: TEAM, season: SEASON, season_type: STYPE,
       limit: { type: "integer", description: "How many games (default 10, max 82)." },
@@ -51,22 +53,26 @@ export const SPECS: ToolSpec[] = [
   },
   {
     name: "get_player",
-    description: "One player's season: per-game averages, advanced metrics (TS%, USG%…), shot-zone efficiency and recent games.",
+    description: "One player's season: bio (age, height, position, experience, draft), per-game averages, advanced metrics (TS%, USG%…), shot-zone efficiency and recent games.",
     parameters: { type: "object", properties: {
       name: { type: "string", description: "Player's full name, e.g. 'Jayson Tatum'." },
       season: SEASON,
+      games: { type: "integer", description: "How many recent games to include (default 8, max 82)." },
     }, required: ["name"] },
   },
   {
     name: "get_game_details",
-    description: "Box-score story of one completed game: quarter scores and top performers. Needs an NBA game_id from get_team_games.",
+    description:
+      "How a game went, live or finished: score, status, quarter scores, runs, top performers. " +
+      "Easiest: pass `team` for that team's game today (or its most recent one). Or pass a game_id from the scoreboard or a game log.",
     parameters: { type: "object", properties: {
-      game_id: { type: "string", description: "10-digit NBA game id, e.g. '0022500123'." },
-    }, required: ["game_id"] },
+      team: { ...TEAM, description: "Team name, nickname, city or tricode. Gets that team's game today, or its latest game." },
+      game_id: { type: "string", description: "A game_id from get_scoreboard or get_team_games, e.g. 'espn_401810123' or '0022500123'." },
+    } },
   },
   {
     name: "get_scoreboard",
-    description: "Scores and status of every game on a date (live, final or scheduled).",
+    description: "Scores and status of every game on a date (live, final or scheduled), each with a game_id for get_game_details.",
     parameters: { type: "object", properties: {
       date: { type: "string", description: "YYYY-MM-DD. Omit for today." },
     } },
@@ -107,12 +113,20 @@ export const SPECS: ToolSpec[] = [
   },
   {
     name: "get_news",
-    description: "Latest ESPN headlines for a team, or league-wide when no team is given.",
+    description: "Latest news for a team, or league-wide when no team is given: headlines (default), or trade rumors with who reported them.",
+    parameters: { type: "object", properties: {
+      team: TEAM,
+      kind: { type: "string", enum: ["headlines", "rumors"], description: "headlines (default) or rumors." },
+    } },
+  },
+  {
+    name: "get_injuries",
+    description: "The current NBA injury report: who is out or questionable, the injury, and the expected return. For one team or the whole league.",
     parameters: { type: "object", properties: { team: TEAM } },
   },
   {
     name: "web_search",
-    description: "Search the web for anything not covered by the stats tools — injuries, trades, rumors, quotes, news after your training data.",
+    description: "Search the web for NBA information not covered by the other tools — quotes, breaking news, history, anything after your training data.",
     parameters: { type: "object", properties: {
       query: { type: "string", description: "Search query." },
     }, required: ["query"] },
@@ -160,6 +174,66 @@ async function findPlayers(name: string) {
   return hits.sort((a, b) => b[2] - a[2]).map(([id, full_name, active]) => ({ id, full_name, is_active: !!active }));
 }
 
+// ── games: nba.com ids, ESPN ids, or "this team's game" ───────────────────────
+
+interface GameRef {
+  id: string;
+  espn: boolean;
+}
+
+/** nba.com's '0022500123', or ESPN's '401810123' / 'espn_401810123'. */
+function parseGameId(raw: string): GameRef | null {
+  const s = raw.replace(/^espn[_:-]?/i, "");
+  if (/^00\d{8}$/.test(s) && !/^espn/i.test(raw)) return { id: s, espn: false };
+  if (/^\d{6,12}$/.test(s)) return { id: s, espn: true };
+  return null;
+}
+
+const sideHas = (g: data.LiveGame, t: Team) => g.home.espn_id === t.espn_id || g.away.espn_id === t.espn_id;
+
+/** A team's game today (live or final), else its latest final. */
+async function teamGame(t: Team, cache: Cache): Promise<[GameRef | null, string]> {
+  const today = await data.fetchScoreboard().catch(() => null);
+  const g = today?.games.find((x) => sideHas(x, t));
+  if (g && g.state !== "pre") return [{ id: g.id, espn: true }, ""];
+  const upcoming = g ? `${t.nickname} play later today: ${g.away.abbr} @ ${g.home.abbr}, ${g.status_text}. This is their last game.` : "";
+  const finals = (await data.fetchRecentFinals().catch(() => [])).filter((f) => f.home.nba_id === t.id || f.away.nba_id === t.id);
+  if (finals.length) {
+    const f = finals.reduce((a, b) => (b.date_utc > a.date_utc ? b : a));
+    return [{ id: f.espn_id, espn: true }, upcoming];
+  }
+  const { games } = await services.teamOverview(t.id, currentSeason(), cache);
+  const last: any = games.playoffs[0] && games.playoffs[0].iso > (games.regular[0]?.iso ?? "") ? games.playoffs[0] : games.regular[0];
+  if (!last) return [null, ""];
+  return [last.espn_id ? { id: last.espn_id, espn: true } : { id: last.game_id, espn: false }, upcoming];
+}
+
+/** The top scorers on one side of an ESPN box. */
+function topLines(side: any) {
+  if (!side?.players) return [];
+  return [...side.players]
+    .filter((p: any) => !p.dnp)
+    .sort((a: any, b: any) => b.pts - a.pts)
+    .slice(0, 5)
+    .map((p: any) => ({ player: p.name, min: p.min, pts: p.pts, reb: p.reb, ast: p.ast, fg: `${p.fgm}-${p.fga}`, three: `${p.tpm}-${p.tpa}`, pm: p.pm }));
+}
+
+const scoreLine = (g: data.LiveGame) => ({
+  game_id: `espn_${g.id}`,
+  status: g.state === "post" ? "final" : g.state === "in" ? "live" : "scheduled",
+  detail: g.status_text,
+  tip_utc: g.date_utc,
+  away: { team: g.away.app_name, abbr: g.away.abbr, score: g.away.score, record: g.away.record },
+  home: { team: g.home.app_name, abbr: g.home.abbr, score: g.home.score, record: g.home.record },
+});
+
+function playerBio(b: Record<string, any>) {
+  const age = b.birthdate ? Math.floor((Date.now() - Date.parse(b.birthdate)) / (365.25 * 86400_000)) : null;
+  const ht = b.height_in ? `${Math.floor(b.height_in / 12)}-${b.height_in % 12}` : null;
+  const draft = b.draft_year ? (b.draft_pick ? `${b.draft_year} round ${b.draft_round}, pick ${b.draft_pick}` : `${b.draft_year} undrafted`) : null;
+  return { age, height: ht, weight_lb: b.weight_lb, position: b.position, jersey: b.jersey, experience_years: b.season_exp, school: b.school, country: b.country, draft };
+}
+
 // ── executors (return [data, short human summary]) ───────────────────────────
 
 type Exec = (args: Args, cache: Cache) => Promise<[unknown, string]>;
@@ -182,17 +256,12 @@ const EXECUTORS: Record<string, Exec> = {
     const tid = teamId(args.team);
     const stype = parseSeasonType(args.season_type);
     const limit = clampInt(args.limit, 10, 1, 82);
-    let games;
-    if (stype === SEASON_TYPE_FULL) {
-      games = [
-        ...(await data.fetchGamelog(tid, season(args), cache, 0, SEASON_TYPE_PLAYOFFS)),
-        ...(await data.fetchGamelog(tid, season(args), cache, 0)),
-      ].slice(0, limit);
-    } else {
-      games = await data.fetchGamelog(tid, season(args), cache, limit, stype);
-    }
+    // The overview's logs include tonight's ESPN final before nba.com has it.
+    const { games: log } = await services.teamOverview(tid, season(args), cache);
+    const games =
+      stype === SEASON_TYPE_FULL ? [...log.playoffs, ...log.regular] : stype === SEASON_TYPE_PLAYOFFS ? log.playoffs : log.regular;
     // The log only carries this team's points; the margin gives the opponent's.
-    const out = games.map((g) => ({ ...g, opp_pts: round(g.pts - g.plus_minus) }));
+    const out = games.slice(0, limit).map((g) => ({ ...g, opp_pts: round(g.pts - g.plus_minus) }));
     return [out, `Pulled ${getTeamAbbr(tid)} game log`];
   },
 
@@ -215,26 +284,45 @@ const EXECUTORS: Record<string, Exec> = {
     const out: Record<string, unknown> = { player: p.full_name, season: s, team: team ? team.full_name : abbr };
     if (team) {
       const prof = await services.playerProfile(p.id, team.id, s, cache);
+      if (prof.bio) out.bio = playerBio(prof.bio);
       out.per_game = prof.player;
       out.advanced = prof.advanced;
       out.per36 = prof.per36;
       out.shot_zones = zoneSummary(prof.shots);
     }
-    out.last_games = games.slice(-8);
+    out.last_games = games.slice(-clampInt(args.games, 8, 1, 82)).reverse();
     return [out, `Pulled ${p.full_name} profile`];
   },
 
   async get_game_details(args, cache) {
-    const gid = String(args.game_id).trim();
-    if (!/^\d{10}$/.test(gid)) throw new ToolError("game_id must be the 10-digit NBA id from get_team_games");
-    const d = structuredClone(await data.fetchGameBreakdown(gid, cache));
+    const raw = String(args.game_id ?? "").trim();
+    let ref: GameRef | null = raw ? parseGameId(raw) : null;
+    let note = "";
+    if (!ref && args.team) {
+      const t = findTeam(args.team);
+      if (!t) throw new ToolError(`Unknown team '${args.team}'`);
+      [ref, note] = await teamGame(t, cache);
+    }
+    if (!ref) {
+      throw new ToolError(raw ? `'${raw}' isn't a game id. Pass the team instead, e.g. team='Celtics'.` : "Pass a team, e.g. team='Celtics', or a game_id.");
+    }
+    if (ref.espn) {
+      const [recap, box] = await Promise.all([pulse.recapContext(ref.id), data.fetchEspnBox(ref.id).catch(() => null)]);
+      const out: Record<string, unknown> = { game_id: `espn_${ref.id}`, game: recap };
+      if (box) out.top_players = { away: topLines(box.away), home: topLines(box.home) };
+      if (note) out.note = note;
+      return [out, "Pulled game story"];
+    }
+    const d = structuredClone(await data.fetchGameBreakdown(ref.id, cache));
     for (const side of ["home", "away"]) if (d[side]?.players) d[side].players = d[side].players.slice(0, 6);
-    return [d, `Pulled game ${gid} box score`];
+    if (note) d.note = note;
+    return [d, `Pulled game ${ref.id} box score`];
   },
 
   async get_scoreboard(args) {
     const date = String(args.date ?? "").replaceAll("-", "");
-    return [await data.fetchScoreboard(date || null), `Pulled scoreboard${args.date ? " for " + args.date : ""}`];
+    const sb = await data.fetchScoreboard(date || null);
+    return [{ date: sb.date, games: sb.games.map(scoreLine) }, `Pulled scoreboard${args.date ? " for " + args.date : ""}`];
   },
 
   async get_upcoming_games(args, cache) {
@@ -301,14 +389,35 @@ const EXECUTORS: Record<string, Exec> = {
   },
 
   async get_news(args, cache) {
-    let name = "";
-    if (args.team) name = findTeam(args.team)?.full_name ?? "";
+    const t = args.team ? findTeam(args.team) : null;
+    const name = t?.full_name ?? "";
+    if (args.kind === "rumors") {
+      const h = await news.hub(t?.id, cache);
+      const items = h.rumors.slice(0, 15).map(({ title, summary, source, published }) => ({ headline: title, summary, source, published }));
+      return [items, `Read ${name ? name.split(" ").at(-1) + " " : ""}trade rumors`];
+    }
     const items = await data.fetchNews(name, cache);
     return [items.map(({ headline, description, published }) => ({ headline, description, published })), `Read ${name ? name.split(" ").at(-1) : "league"} news`];
   },
 
+  async get_injuries(args, cache) {
+    const report = await news.injuries(cache);
+    const slim = (rows: news.InjuryRow[]) =>
+      rows.map(({ player, position, status, injury, return_date, comment }) => ({ player, position, status, injury, return_date, comment }));
+    if (args.team) {
+      const t = findTeam(args.team);
+      if (!t) throw new ToolError(`Unknown team '${args.team}'`);
+      const rows = report[t.full_name] ?? [];
+      return [{ team: t.full_name, injuries: rows.length ? slim(rows) : "No injuries reported." }, `Read ${t.nickname} injuries`];
+    }
+    const league = Object.entries(report).filter(([, rows]) => rows.length).map(([team, rows]) => ({ team, injuries: slim(rows) }));
+    return [league, "Read the injury report"];
+  },
+
   async web_search(args) {
-    const q = String(args.query).trim();
+    let q = String(args.query).trim();
+    // Keep searches on the NBA.
+    if (!/\b(nba|basketball|hoops)\b/i.test(q)) q = `NBA ${q}`;
     const [text] = await data.webSearch(q);
     return [text || "No results.", `Searched the web: “${q.slice(0, 60)}”`];
   },
@@ -351,14 +460,41 @@ export function validateArgs(name: string, args: unknown) {
   }
 }
 
+/** The longest array anywhere in `obj`, or null. */
+function longestArray(obj: unknown): unknown[] | null {
+  let best: unknown[] | null = null;
+  const walk = (v: unknown) => {
+    if (Array.isArray(v)) {
+      if (!best || v.length > best.length) best = v;
+      v.forEach(walk);
+    } else if (v && typeof v === "object") Object.values(v).forEach(walk);
+  };
+  walk(obj);
+  return best;
+}
+
+/** JSON of `result` within `limit` chars: long lists are shortened (from the
+ *  end: they're newest/best first) so the model still gets valid JSON; plain
+ *  text is cut. */
+export function fitResult(result: unknown, limit: number): string {
+  if (typeof result === "string") return result.length > limit ? result.slice(0, limit) + " …[truncated]" : result;
+  const obj = roundFloats(result);
+  let text = JSON.stringify(obj);
+  while (text.length > limit) {
+    const arr = longestArray(obj);
+    if (!arr || arr.length < 2) break;
+    arr.length = Math.max(1, Math.floor(arr.length * Math.min(0.75, limit / text.length)));
+    text = JSON.stringify(obj);
+  }
+  return text.length > limit ? text.slice(0, limit) + " …[truncated]" : text;
+}
+
 /** Run a tool. Returns [result_text, summary, ok]. */
-export async function execute(name: string, args: Args, cache: Cache): Promise<[string, string, boolean]> {
+export async function execute(name: string, args: Args, cache: Cache, limit = MAX_RESULT_CHARS): Promise<[string, string, boolean]> {
   try {
     validateArgs(name, args);
     const [result, summary] = await EXECUTORS[name](args, cache);
-    let text = typeof result === "string" ? result : JSON.stringify(roundFloats(result));
-    if (text.length > MAX_RESULT_CHARS) text = text.slice(0, MAX_RESULT_CHARS) + " …[truncated]";
-    return [text, summary, true];
+    return [fitResult(result, limit), summary, true];
   } catch (e: any) {
     if (e instanceof ToolError) return [JSON.stringify({ error: e.message }), e.message, false];
     console.warn(`tool ${name} failed:`, e);
