@@ -240,3 +240,164 @@ describe("guessed game ids", () => {
     expect(sent[0].messages[0].content).toContain("game_id espn_401800001 ← the user's team");
   });
 });
+
+// ── previews and the screens' data ───────────────────────────────────────────
+
+const NYK = 1610612752;
+const MIA = 1610612748;
+const BKN = 1610612751;
+const season = (await import("../web/src/backend/config")).currentSeason();
+const lastSeason = `${parseInt(season, 10) - 1}-${season.slice(2, 4)}`;
+
+const pre = (id: string, home: [string, string, string], away: [string, string, string], odds?: object) => ({
+  id,
+  date: new Date(Date.now() + 6 * 3600_000).toISOString(),
+  season: { type: 2 },
+  status: { period: 0, displayClock: "0.0", type: { state: "pre", shortDetail: "7:30 PM ET" } },
+  competitions: [{
+    competitors: [
+      { homeAway: "home", score: "0", team: { id: home[0], abbreviation: home[1] }, records: [{ summary: home[2] }] },
+      { homeAway: "away", score: "0", team: { id: away[0], abbreviation: away[1] }, records: [{ summary: away[2] }] },
+    ],
+    ...(odds ? { odds: [odds] } : {}),
+  }],
+});
+const advRow = (TEAM_ID: number, GP: number, NET_RATING: number, DEF_RATING = 110) => ({ TEAM_ID, TEAM_NAME: "", GP, NET_RATING, DEF_RATING });
+const glRow = (gid: string, tid: number, abbr: string, matchup: string, wl: string, pts: number) =>
+  ({ GAME_ID: gid, GAME_DATE: "2026-10-22", TEAM_ID: tid, TEAM_ABBREVIATION: abbr, MATCHUP: matchup, WL: wl, PTS: pts, MIN: 240 });
+
+function slate() {
+  return serve([
+    ["scoreboard", { day: { date: iso }, events: [
+      pre("401900001", ["2", "BOS", "11-3"], ["17", "BKN", "5-9"], { details: "BOS -9.5", overUnder: 221.5 }),
+      pre("401900002", ["14", "MIA", "7-7"], ["18", "NY", "8-6"]),
+      espnFinal,
+    ] }],
+    ["injuries", { injuries: [{ id: "2", injuries: [
+      { athlete: { displayName: "Kristaps Porzingis" }, status: "Out", details: { type: "Ankle" } },
+      { athlete: { displayName: "Jrue Holiday" }, status: "Day-To-Day", details: { type: "Hamstring" } },
+    ] }] }],
+    ["leaguestandingsv3", resultSet([
+      { TeamID: BOS, Conference: "East", PlayoffRank: 2, WINS: 11, LOSSES: 3, L10: "8-2" },
+      { TeamID: BKN, Conference: "East", PlayoffRank: 13, WINS: 5, LOSSES: 9, L10: "3-7" },
+    ])],
+    [`Season=${lastSeason}`, resultSet([advRow(BOS, 82, 9.0), advRow(BKN, 82, -8.0), advRow(NYK, 82, 4.0), advRow(MIA, 82, 1.0)])],
+    ["leaguedashteamstats", resultSet([advRow(BOS, 14, 7.4, 106), advRow(BKN, 14, -6.1, 118), advRow(NYK, 14, 2.0, 111), advRow(MIA, 14, 0.5, 109)])],
+    ["leaguegamelog", resultSet([glRow("0022600050", BOS, "BOS", "BOS @ BKN", "W", 120), glRow("0022600050", BKN, "BKN", "BKN vs. BOS", "L", 101)])],
+  ]);
+}
+
+describe("game previews", () => {
+  beforeEach(() => data.clearRecentFinals());
+
+  it("does the estimate math", () => {
+    const even = tools.estimate(0, 0);
+    expect(even.margin).toBe(2);
+    expect(even.homeWin).toBeCloseTo(0.566, 2);
+    // early season: this year's 14 games lean on last season's rating
+    expect(tools.blendedNet(7.4, 14, 9.0)).toBeCloseTo((14 * 7.4 + 6 * 9.0) / 24, 6);
+    expect(tools.blendedNet(null, 0, 9.0)).toBeCloseTo(5.4, 6);
+    expect(tools.blendedNet(null, 0, null)).toBeNull();
+  });
+
+  it("previews every game in one call", async () => {
+    slate();
+    const [text, summary, ok] = await tools.execute("get_game_previews", {}, new Cache({ persist: false }), 4000);
+    expect(ok).toBe(true);
+    expect(summary).toBe("Previewed 3 games");
+    const [bos, mia, fin] = text.split("\n").filter((l) => l.startsWith("- "));
+    // records, seeds, form, net, injuries
+    expect(bos).toContain("BKN Nets 5-9 (E#13, L10 3-7, net -6.1)");
+    expect(bos).toContain("BOS Celtics 11-3 (E#2, L10 8-2, net +7.4, out: Porzingis, Holiday (q))");
+    // the line, then the app's estimate (blended nets 6.57 vs -5.56, +2 home)
+    expect(bos).toContain("line BOS -9.5, O/U 221.5");
+    expect(bos).toContain("estimate BOS by 14, 88%");
+    expect(bos).toContain("season series BOS 1-0");
+    expect(bos).toContain("game_id espn_401900001");
+    // no line posted: still an estimate
+    expect(mia).not.toContain("line ");
+    expect(mia).toMatch(/estimate (MIA|NY) by \d+, \d+%/);
+    expect(mia).toContain("first meeting this season");
+    // finished games show the score instead
+    expect(fin).toContain("FINAL: BKN 100 @ BOS 110");
+    expect(fin).not.toContain("estimate");
+    expect(text).toContain("an estimate, not a certainty");
+  });
+
+  it("filters to one team", async () => {
+    slate();
+    const [text, summary] = await tools.execute("get_game_previews", { team: "Heat" }, new Cache({ persist: false }));
+    expect(summary).toBe("Previewed 1 game");
+    expect(text).toContain("MIA Heat");
+    expect(text).not.toContain("BOS Celtics");
+  });
+
+  it("puts the slate in the snapshot for models without tools", async () => {
+    slate();
+    const sys = await router.buildSystem({ mode: "chat" }, new Cache({ persist: false }), false);
+    expect(sys).toContain("estimate BOS by 14");
+    expect(sys).toContain("BKN (5-9) @ BOS (11-3)");
+  });
+});
+
+describe("the screens' data", () => {
+  it("ranks one team in a category (League › Team rankings)", async () => {
+    slate();
+    const { out } = await run("get_league_leaders", { category: "def rating", team: "Nets", top: 2 });
+    expect(out.ranking.map((r: any) => r.value)).toEqual([106, 109]);
+    expect(out.team_rank).toMatchObject({ rank: 4, of: 4, value: 118 });
+  });
+
+  it("asks for the rookie class (League › Rookies)", async () => {
+    const calls = serve([["leaguedashplayerstats", resultSet([{ PLAYER_ID: 9, PLAYER_NAME: "Zed Rookieman", TEAM_ID: BOS, TEAM_ABBREVIATION: "BOS", GP: 10, PTS: 15 }])]]);
+    const { out, summary } = await run("get_player_leaders", { category: "points", rookies: true, season: "2017-18" });
+    expect(calls[0]).toContain("PlayerExperience=Rookie");
+    expect(summary).toBe("Ranked rookies by Points");
+    expect(out.group).toBe("rookies only");
+    expect(out.ranking[0].player).toBe("Zed Rookieman");
+  });
+
+  it("finds players the bundled list doesn't know", async () => {
+    serve([
+      ["leaguedashplayerstats", resultSet([{ PLAYER_ID: 1650001, PLAYER_NAME: "Zed Rookieman", TEAM_ID: BOS, TEAM_ABBREVIATION: "BOS", GP: 3, PTS: 9 }])],
+      ["playergamelog", resultSet([], ["GAME_ID", "GAME_DATE", "MATCHUP"])],
+    ]);
+    const { out, ok } = await run("get_player", { name: "zed rookieman" });
+    expect(ok).toBe(true);
+    expect(out.player).toBe("Zed Rookieman");
+  });
+
+  it("goes back season by season (Trends)", async () => {
+    const row = (YEAR: string, WINS: number, CONF_RANK: number, PO_WINS: number, PO_LOSSES: number, NBA_FINALS_APPEARANCE: string) =>
+      ({ YEAR, WINS, LOSSES: 82 - WINS, WIN_PCT: WINS / 82, PTS: 115, REB: 44, AST: 26, FG_PCT: 0.47, FG3_PCT: 0.37, FT_PCT: 0.8, CONF_RANK, PO_WINS, PO_LOSSES, NBA_FINALS_APPEARANCE });
+    serve([["teamyearbyyearstats", resultSet([row("2022-23", 57, 2, 11, 9, "N/A"), row("2023-24", 64, 1, 16, 3, "LEAGUE CHAMPION"), row("2024-25", 61, 2, 5, 6, "N/A")])]]);
+    const { out } = await run("get_team_history", { team: "BOS", seasons: 2 });
+    expect(out.seasons.map((s: any) => s.season)).toEqual(["2024-25", "2023-24"]);
+    expect(out.seasons[1]).toMatchObject({ wins: 64, conf_rank: 1, playoffs: "16-3", finals: "champion" });
+  });
+
+  it("searches a season's results (Scores)", async () => {
+    serve([["leaguegamelog", resultSet([
+      glRow("0021700001", BOS, "BOS", "BOS vs. NYK", "W", 130), glRow("0021700001", NYK, "NYK", "NYK @ BOS", "L", 90),
+      glRow("0021700002", BOS, "BOS", "BOS @ MIA", "L", 120), glRow("0021700002", MIA, "MIA", "MIA vs. BOS", "W", 125),
+      glRow("0021700003", NYK, "NYK", "NYK vs. MIA", "W", 101), glRow("0021700003", MIA, "MIA", "MIA @ NYK", "L", 99),
+    ])]]);
+    let { out } = await run("get_season_games", { season: "2017-18", sort: "margin" });
+    expect(out.matching_games).toBe(3);
+    expect(out.games[0]).toContain("NYK 90 @ BOS 130 (BOS by 40)");
+    ({ out } = await run("get_season_games", { season: "2017-18", sort: "total" }));
+    expect(out.games[0]).toContain("BOS 120 @ MIA 125");
+    ({ out } = await run("get_season_games", { season: "2017-18", team: "Celtics", opponent: "Knicks" }));
+    expect(out.games).toHaveLength(1);
+    expect(out.record).toBe("BOS 1-0 vs NYK in these games");
+  });
+
+  it("routes questions in the prompt and doesn't pin the slate to the viewed team", async () => {
+    slate();
+    const sys = await router.buildSystem({ mode: "chat", team_id: BOS }, new Cache({ persist: false }), true);
+    expect(sys).toContain("tonight's / a date's games, matchups, previews, predictions, who's favored → get_game_previews");
+    expect(sys).toContain("rookies=true");
+    expect(sys).toContain("Questions about tonight's games, the league, other teams or players are not limited to the Boston Celtics");
+    expect(sys).not.toContain("Assume questions are about this team");
+  });
+});

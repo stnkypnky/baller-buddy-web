@@ -42,13 +42,20 @@ const BASE_PERSONA =
   "and fun to read, like a great beat writer who also knows the numbers. Today is {today}.";
 
 const CHAT_RULES =
-  "Ground every claim in data. Use your tools to fetch real stats (standings, team reports, " +
-  "rosters, players, team and player leaderboards, game logs, live and finished games, schedules, " +
-  "injuries, news, trade rumors, web search) instead of guessing, " +
-  "and for a question about a team's game (\"how was the game tonight\") call get_game_details with that team. " +
-  "and call several tools when a question needs it. Never invent numbers. " +
-  "If one tool's data doesn't cover part of the question (a player's line, say), call the tool " +
-  "that does; never tell the user to look it up or name a tool to them. " +
+  "Answer from data, never from memory: fetch it with your tools (or read it from TODAY'S NBA GAMES below), " +
+  "and never invent a number, score, record or play. If a tool fails or doesn't have it, say what couldn't be " +
+  "loaded instead of guessing. Call several tools when a question needs it; never tell the user to look " +
+  "something up or name a tool to them.\n" +
+  "Which tool to use:\n" +
+  "- tonight's / a date's games, matchups, previews, predictions, who's favored → get_game_previews (one call covers every game)\n" +
+  "- how a game went or is going → get_game_details with team=…\n" +
+  "- a day's scores → get_scoreboard; a season's results, blowouts, head-to-head → get_season_games\n" +
+  "- a player's stats, bio, recent games → get_player; best players at a stat → get_player_leaders (rookies=true for rookies)\n" +
+  "- team record, form, averages → get_team_report; roster and minutes → get_roster; game log → get_team_games\n" +
+  "- where teams rank (offense, defense, pace…) → get_league_leaders (team=… for one team's rank); standings → get_standings\n" +
+  "- seasons past, best seasons, trends → get_team_history; two teams side by side → compare_teams\n" +
+  "- injuries → get_injuries; news → get_news (kind=rumors for trades); schedule → get_upcoming_games; anything else → web_search\n" +
+  "For predictions: give the betting line first, then the app's estimate, form and injuries, and call them estimates.\n" +
   "Format answers in Markdown: a one-line takeaway first, then short sections or bullets; " +
   "use a compact table when comparing several numbers. Keep it tight unless asked for depth.";
 
@@ -124,14 +131,15 @@ function cleanHistory(messages: ChatRequest["messages"]): ChatMessage[] {
   return out;
 }
 
-async function viewLine(teamId: number | null | undefined, season: string, page: string | null | undefined, cache: Cache) {
+async function viewLine(teamId: number | null | undefined, season: string, cache: Cache) {
   if (!teamId) return "";
   const name = getTeamName(teamId);
   const st: any = await data.fetchStandings(teamId, season, cache);
   const rec = st.wins !== undefined ? ` — ${st.wins}-${st.losses}, #${st.conf_rank} in the ${st.conference}` : "";
   return (
-    `\n\nThe user is looking at the ${name} (${season})${rec} on the ${page || "Overview"} page. Assume questions are about this team unless they say otherwise. ` +
-    `"The game", "tonight" or "last night" means the ${name} game: call get_game_details with team="${name}".`
+    `\n\nThe user follows the ${name} (${season})${rec}. When a question needs a team and names none ` +
+    `("the game", "last night", "their next game", "our best player"), it means the ${name}: for their game call get_game_details with team="${name}". ` +
+    `Questions about tonight's games, the league, other teams or players are not limited to the ${name}.`
   );
 }
 
@@ -148,9 +156,13 @@ export async function buildSystem(req: ChatRequest, cache: Cache, withTools: boo
     }
     return `${persona}\n\n${MODE_PROMPTS[mode]}${extra}`;
   }
-  let sys = `${persona}\n\n${SCOPE_RULE}\n\n${CHAT_RULES}${await viewLine(req.team_id, season, req.page, cache)}${await todayBlock(req.team_id)}`;
-  if (!withTools && req.team_id) {
-    sys += "\n\nYou have no live tools for this model; answer from this data snapshot:\n\n" + (await services.teamContext(req.team_id, season, cache));
+  let sys = `${persona}\n\n${SCOPE_RULE}\n\n${CHAT_RULES}${await viewLine(req.team_id, season, cache)}${await todayBlock(req.team_id)}`;
+  if (!withTools) {
+    const snapshot = [
+      req.team_id ? await services.teamContext(req.team_id, season, cache).catch(() => "") : "",
+      await tools.slatePreview(cache).catch(() => ""),
+    ].filter(Boolean);
+    if (snapshot.length) sys += "\n\nYou have no live tools for this model; answer from this data snapshot:\n\n" + snapshot.join("\n\n");
   }
   return sys;
 }
@@ -161,13 +173,20 @@ async function todayBlock(teamId?: number | null) {
   if (!sb?.games.length) return "";
   const mine = teamId ? findTeam(getTeamName(teamId))?.espn_id : undefined;
   const line = (g: data.LiveGame) => {
-    const score = g.state === "pre" ? `${g.away.abbr} @ ${g.home.abbr}` : `${g.away.abbr} ${g.away.score} @ ${g.home.abbr} ${g.home.score}`;
+    const rec = (e: data.EspnSide) => (e.record ? ` (${e.record})` : "");
+    const score =
+      g.state === "pre"
+        ? `${g.away.abbr}${rec(g.away)} @ ${g.home.abbr}${rec(g.home)}`
+        : `${g.away.abbr} ${g.away.score} @ ${g.home.abbr} ${g.home.score}`;
     const state = g.state === "post" ? "Final" : g.state === "in" ? `LIVE ${g.status_text}` : g.status_text;
     const tag = mine && (g.home.espn_id === mine || g.away.espn_id === mine) ? " ← the user's team" : "";
     return `- ${score} · ${state} · game_id espn_${g.id}${tag}`;
   };
   const lines = sb.games.slice(0, TODAY_LINES).map(line);
-  return `\n\nTODAY'S NBA GAMES (Eastern date ${sb.date.slice(0, 10) || data.nbaToday()}; scores as of this message, use get_game_details for more):\n${lines.join("\n")}`;
+  return (
+    `\n\nTODAY'S NBA GAMES (Eastern date ${sb.date.slice(0, 10) || data.nbaToday()}; scores as of this message. ` +
+    `For previews and predictions call get_game_previews, for how a game went get_game_details):\n${lines.join("\n")}`
+  );
 }
 
 async function chain(req: ChatRequest): Promise<[string, string][]> {

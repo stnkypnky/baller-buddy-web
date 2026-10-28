@@ -242,5 +242,8 @@ export const TOOL_LABELS: Record<string, string> = {
   get_player_leaders: "Player leaders",
   get_news: "News",
   get_injuries: "Injuries",
+  get_game_previews: "Previews",
+  get_team_history: "History",
+  get_season_games: "Results",
   web_search: "Web search",
 };

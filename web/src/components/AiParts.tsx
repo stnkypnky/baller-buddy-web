@@ -12,6 +12,8 @@ import {
   Cpu,
   Globe,
   HeartPulse,
+  History,
+  ListOrdered,
   Medal,
   Newspaper,
   Radio,
@@ -19,6 +21,7 @@ import {
   Settings2,
   Square,
   Swords,
+  Target,
   Trophy,
   TriangleAlert,
   User,
@@ -49,6 +52,9 @@ const TOOL_ICONS: Record<string, ReactNode> = {
   get_player_leaders: <Medal />,
   get_news: <Newspaper />,
   get_injuries: <HeartPulse />,
+  get_game_previews: <Target />,
+  get_team_history: <History />,
+  get_season_games: <ListOrdered />,
   web_search: <Globe />,
 };
 

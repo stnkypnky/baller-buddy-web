@@ -309,17 +309,19 @@ export function fetchDashboard(teamId: number, season: string, cache: Cache, sea
   );
 }
 
-/** Per-game averages for the team's last `seasons` seasons, oldest first. */
-export function fetchHistory(teamId: number, cache: Cache, seasons = 6) {
-  return cache.getOrFetch(
-    `history_v2_${teamId}`,
+/** Per-game averages for the team's last `seasons` seasons, oldest first,
+ *  with each season's conference rank and playoff result. */
+export async function fetchHistory(teamId: number, cache: Cache, seasons = 6) {
+  // Cached whole, so any number of seasons comes from one request.
+  const all = await cache.getOrFetch(
+    `history_v3_${teamId}`,
     async () => {
       const j = await statsGet("teamyearbyyearstats", {
         TeamID: teamId, LeagueID: "00", PerMode: "PerGame", SeasonType: "Regular Season",
       });
-      return resultSet(j)
-        .slice(-seasons)
-        .map((r) => ({
+      return resultSet(j).map((r) => {
+        const finals = str(r.NBA_FINALS_APPEARANCE).toUpperCase();
+        return {
           season: str(r.YEAR),
           wins: int(r.WINS),
           losses: int(r.LOSSES),
@@ -330,10 +332,15 @@ export function fetchHistory(teamId: number, cache: Cache, seasons = 6) {
           fg_pct: round(num(r.FG_PCT) * 100, 1),
           fg3_pct: round(num(r.FG3_PCT) * 100, 1),
           ft_pct: round(num(r.FT_PCT) * 100, 1),
-        }));
+          conf_rank: intOrNull(r.CONF_RANK) || null,
+          playoffs: int(r.PO_WINS) + int(r.PO_LOSSES) ? `${int(r.PO_WINS)}-${int(r.PO_LOSSES)}` : null,
+          finals: finals.includes("CHAMPION") ? "champion" : finals.includes("FINALS") ? "finals" : null,
+        };
+      });
     },
     { fallback: [] },
   );
+  return all.slice(-seasons);
 }
 export type HistoryRow = Awaited<ReturnType<typeof fetchHistory>>[number];
 
@@ -1025,6 +1032,16 @@ export interface LiveGame {
   stype: number;
   home: EspnSide;
   away: EspnSide;
+  /** The betting line when ESPN has one ("BOS -4.5", 221.5). */
+  odds: { details: string; over_under: number | null } | null;
+}
+
+function espnOdds(comp: any): LiveGame["odds"] {
+  const o = comp?.odds?.[0];
+  const details = typeof o?.details === "string" ? o.details.trim() : "";
+  const ou = Number(o?.overUnder);
+  if (!details && !Number.isFinite(ou)) return null;
+  return { details, over_under: Number.isFinite(ou) && ou > 0 ? ou : null };
 }
 
 export function parseScoreboard(j: any) {
@@ -1049,6 +1066,7 @@ export function parseScoreboard(j: any) {
         stype: int(ev.season?.type, 2),
         home: espnSide(home),
         away: espnSide(away),
+        odds: espnOdds(comp),
       });
     } catch {
       continue;
