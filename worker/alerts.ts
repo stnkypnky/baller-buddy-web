@@ -4,6 +4,7 @@
 
 import { processGames, inQuietHours, type Game, type GameState } from "../shared/alertsCore";
 import { loadSubs, saveSubs, sendPush, type PushEnv } from "./lib/push";
+import { handleProxy } from "./lib/proxy";
 
 const SCOREBOARD = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard";
 
@@ -59,8 +60,10 @@ export async function runOnce(env: PushEnv, now = new Date()) {
   if (!Object.keys(subs).length) return { alerts: 0, sent: 0 };
 
   const day = nbaToday(now);
-  const r = await fetch(`${SCOREBOARD}?dates=${day}`, { headers: { "User-Agent": "Mozilla/5.0" } });
-  if (!r.ok) throw new Error(`ESPN scoreboard HTTP ${r.status}`);
+  // Through the proxy, so the cron shares the edge-cached board with the apps.
+  const edge = typeof caches !== "undefined" ? (caches as any).default : undefined;
+  const r = await handleProxy(new Request(`https://cron.local/api/proxy?url=${encodeURIComponent(`${SCOREBOARD}?dates=${day}`)}`), edge);
+  if (!r.ok) throw new Error(`ESPN scoreboard HTTP ${r.status}: ${(await r.text()).slice(0, 120)}`);
   const games = parseGames(await r.json());
 
   const key = `state:${day}`;

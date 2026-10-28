@@ -405,3 +405,42 @@ describe("api router", () => {
     expect(o.next_game).toBeNull(); // past season
   });
 });
+
+describe("shared scoreboard", () => {
+  const board = (state: string) => ({ day: { date: "2026-10-20" }, events: [{
+    id: "1", date: "2026-10-20T23:30:00Z", season: { type: 2 },
+    status: { period: 4, displayClock: "0.0", type: { state, shortDetail: "Final" } },
+    competitions: [{ competitors: [
+      { homeAway: "home", score: "110", team: { id: "2", abbreviation: "BOS" } },
+      { homeAway: "away", score: "100", team: { id: "17", abbreviation: "BKN" } },
+    ] }],
+  }] });
+
+  it("makes one request for callers asking at the same time", async () => {
+    const calls = serve([["scoreboard", board("in")]]);
+    await Promise.all([data.fetchScoreboard(), data.fetchScoreboard(), data.fetchScoreboard()]);
+    await data.fetchScoreboard();
+    expect(calls).toHaveLength(1);
+  });
+
+  it("keeps a finished day on the device", async () => {
+    const calls = serve([["scoreboard", board("post")]]);
+    expect((await data.fetchScoreboard("20200101")).games[0].state).toBe("post");
+    data.clearScoreboards(); // a new visit: only the device's copy is left
+    expect((await data.fetchScoreboard("20200101")).games).toHaveLength(1);
+    expect(calls).toHaveLength(1);
+  });
+
+  it("asks again when the answer comes back empty", async () => {
+    let n = 0;
+    const calls = serve([["scoreboard", () => (n++ ? board("post") : new Response("", { status: 200 }))]]);
+    expect((await data.fetchScoreboard("20200102")).games).toHaveLength(1);
+    expect(calls).toHaveLength(2);
+  });
+
+  it("says what was wrong when it stays empty", async () => {
+    const calls = serve([["scoreboard", () => new Response("", { status: 200 })]]);
+    await expect(data.fetchScoreboard("20200103")).rejects.toThrow("empty response from site.api.espn.com");
+    expect(calls).toHaveLength(2);
+  });
+});

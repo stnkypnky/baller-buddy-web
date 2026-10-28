@@ -59,6 +59,29 @@ export function proxyRule(target: URL): HostRule | null {
   return RULES[target.hostname] ?? null;
 }
 
+/** YYYYMMDD on the NBA's (Eastern) calendar. */
+const easternYmd = (d: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(d).replaceAll("-", "");
+
+/** Seconds the edge may keep this response. ESPN's scoreboard is the one ESPN
+ *  call everything polls (Live, the ticker, tonight's finals, alerts, the AI),
+ *  so every device shares one request per date: a few seconds for a day that
+ *  may still be playing, a day for one that's long over. */
+export function edgeTtl(target: URL, rule: HostRule, now = new Date()): number {
+  if (target.hostname === "site.api.espn.com" && target.pathname.endsWith("/scoreboard")) {
+    const day = target.searchParams.get("dates") ?? "";
+    // 30 hours back: late West-coast games of "yesterday" are over by then.
+    return /^\d{8}$/.test(day) && day <= easternYmd(new Date(now.getTime() - 30 * 3600_000)) ? 86400 : 15;
+  }
+  return rule.edgeTtl;
+}
+
+/** A JSON body that's empty or cut off (doesn't end its outermost value).
+ *  Cheaper than parsing: Workers on the free plan get ~10 ms of CPU. */
+export function brokenJson(text: string): boolean {
+  const t = text.trim();
+  return !t || !/[}\]]$/.test(t);
+}
+
 /** Handles `GET /api/proxy?url=<encoded target>`. */
 export async function handleProxy(request: Request, edgeCache?: Cache): Promise<Response> {
   if (request.method !== "GET") return new Response("method not allowed", { status: 405 });
@@ -71,9 +94,10 @@ export async function handleProxy(request: Request, edgeCache?: Cache): Promise<
   }
   const rule = proxyRule(target);
   if (!rule) return new Response("host not allowed", { status: 403 });
+  const ttl = edgeTtl(target, rule);
 
   const cacheKey = new Request(target.toString());
-  if (edgeCache && rule.edgeTtl) {
+  if (edgeCache && ttl) {
     const hit = await edgeCache.match(cacheKey);
     if (hit) return hit;
   }
@@ -89,9 +113,22 @@ export async function handleProxy(request: Request, edgeCache?: Cache): Promise<
     const v = upstream.headers.get(h);
     if (v) headers.set(h, v);
   }
-  headers.set("Cache-Control", rule.edgeTtl && upstream.ok ? `public, max-age=${rule.edgeTtl}` : "no-store");
   headers.set("X-Upstream-Status", String(upstream.status));
-  const out = new Response(upstream.body, { status: upstream.status, headers });
-  if (edgeCache && rule.edgeTtl && upstream.ok) await edgeCache.put(cacheKey, out.clone());
+
+  // JSON is read whole, so an empty or truncated answer turns into a clear
+  // error (and is never cached) instead of reaching the app as a broken 200.
+  let body: BodyInit | null = upstream.body;
+  if (upstream.ok && (upstream.headers.get("content-type") ?? "").includes("json")) {
+    const text = await upstream.text();
+    headers.set("X-Upstream-Length", String(text.length));
+    if (brokenJson(text)) {
+      headers.set("Cache-Control", "no-store");
+      return new Response(`${text.trim() ? "incomplete" : "empty"} response from ${target.hostname} (HTTP ${upstream.status})`, { status: 502, headers });
+    }
+    body = text;
+  }
+  headers.set("Cache-Control", ttl && upstream.ok ? `public, max-age=${ttl}` : "no-store");
+  const out = new Response(body, { status: upstream.status, headers });
+  if (edgeCache && ttl && upstream.ok) await edgeCache.put(cacheKey, out.clone());
   return out;
 }

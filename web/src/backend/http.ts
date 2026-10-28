@@ -50,8 +50,25 @@ export async function httpGet(url: string, opts: { params?: Params; timeout?: nu
   }
 }
 
-export async function getJson<T = any>(url: string, opts: Parameters<typeof httpGet>[1] = {}): Promise<T> {
-  return (await httpGet(url, opts)).json() as Promise<T>;
+/** JSON from `url`. With `retries`, an empty or cut-off answer, or the
+ *  proxy's 502 for one, is asked for again after a short pause. */
+export async function getJson<T = any>(url: string, opts: Parameters<typeof httpGet>[1] & { retries?: number } = {}): Promise<T> {
+  const host = new URL(url).host;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const text = await (await httpGet(url, opts)).text();
+      if (!text.trim()) throw new HttpError(502, `empty response from ${host}`);
+      try {
+        return JSON.parse(text) as T;
+      } catch {
+        throw new HttpError(502, `incomplete response from ${host}`);
+      }
+    } catch (e) {
+      const again = e instanceof HttpError && e.status === 502 && attempt < (opts.retries ?? 0) && !opts.signal?.aborted;
+      if (!again) throw e;
+      await new Promise((r) => setTimeout(r, 800));
+    }
+  }
 }
 
 export async function getText(url: string, opts: Parameters<typeof httpGet>[1] = {}): Promise<string> {

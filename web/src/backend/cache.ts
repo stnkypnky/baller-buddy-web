@@ -55,6 +55,10 @@ export class Memo<T = unknown> {
     return e[1];
   }
 
+  clear() {
+    this.data.clear();
+  }
+
   set(key: string, value: T, ttl: number) {
     this.data.delete(key);
     this.data.set(key, [now() + ttl, value]);

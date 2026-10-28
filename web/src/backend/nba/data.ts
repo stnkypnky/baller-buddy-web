@@ -3,7 +3,7 @@
  *  so network errors are never cached (Cache.getOrFetch returns the fallback). */
 
 import type { Cache } from "../cache";
-import { localIsoDate, Memo } from "../cache";
+import { cache as appCache, localIsoDate, Memo } from "../cache";
 import {
   ESPN_NEWS_URL,
   ESPN_SCOREBOARD_URL,
@@ -755,7 +755,7 @@ export interface UpcomingGame {
 export function fetchUpcomingGames(cache: Cache, days = UPCOMING_DAYS): Promise<UpcomingGame[]> {
   const today = new Date();
   const dayEvents = async (day: Date) =>
-    ((await getJson(ESPN_SCOREBOARD_URL, { params: { dates: ymd(day) }, timeout: 20 })).events ?? []) as any[];
+    ((await getJson(ESPN_SCOREBOARD_URL, { params: { dates: ymd(day) }, timeout: 20, retries: 1 })).events ?? []) as any[];
   return cache.getOrFetch(
     `upcoming_v3_${localIsoDate(today)}_${days}`,
     async () => {
@@ -763,7 +763,9 @@ export function fetchUpcomingGames(cache: Cache, days = UPCOMING_DAYS): Promise<
       // each day in parallel. Any failed day aborts so a partial schedule
       // isn't cached.
       const dates = Array.from({ length: days + 1 }, (_, i) => new Date(today.getFullYear(), today.getMonth(), today.getDate() + i));
-      const events = (await Promise.all(dates.map(dayEvents))).flat();
+      // A few days at a time: fifteen at once is a burst ESPN may refuse.
+      const events: any[] = [];
+      for (let i = 0; i < dates.length; i += 3) events.push(...(await Promise.all(dates.slice(i, i + 3).map(dayEvents))).flat());
       const games: UpcomingGame[] = [];
       for (const ev of events) {
         try {
@@ -1076,9 +1078,46 @@ export function parseScoreboard(j: any) {
 }
 export type Scoreboard = ReturnType<typeof parseScoreboard>;
 
-/** Today's (or `date` YYYYMMDD) NBA slate from ESPN. Never cached. */
-export async function fetchScoreboard(date?: string | null): Promise<Scoreboard> {
-  return parseScoreboard(await getJson(ESPN_SCOREBOARD_URL, { params: { dates: date || nbaToday() }, timeout: 15 }));
+// Live, the ticker, tonight's finals, the alerts engine and the AI all read
+// the scoreboard; they share one request per date. A finished day never
+// changes, so it's kept on the device.
+const BOARD_LIVE_TTL = 15;
+const BOARD_TTL = 60;
+const BOARD_DONE_TTL = 30 * 86400;
+const boardMemo = new Memo<Scoreboard>(40);
+const boardInflight = new Map<string, Promise<Scoreboard>>();
+
+/** Tests start each case without remembered scoreboards. */
+export function clearScoreboards() {
+  boardMemo.clear();
+  boardInflight.clear();
+}
+
+/** Today's (or `date` YYYYMMDD) NBA slate from ESPN. */
+export function fetchScoreboard(date?: string | null): Promise<Scoreboard> {
+  const day = date || nbaToday();
+  const hit = boardMemo.get(day);
+  if (hit) return Promise.resolve(hit);
+  const running = boardInflight.get(day);
+  if (running) return running;
+  const past = day < nbaToday();
+  const key = `scoreboard_${day}`;
+  const p = (async () => {
+    if (past) {
+      const kept = await appCache.get<Scoreboard>(key, BOARD_DONE_TTL).catch(() => undefined);
+      if (kept) {
+        boardMemo.set(day, kept, BOARD_DONE_TTL);
+        return kept;
+      }
+    }
+    const sb = parseScoreboard(await getJson(ESPN_SCOREBOARD_URL, { params: { dates: day }, timeout: 15, retries: 1 }));
+    const done = past && sb.games.length > 0 && sb.games.every((g) => g.state === "post");
+    boardMemo.set(day, sb, done ? BOARD_DONE_TTL : sb.games.some((g) => g.state === "in") ? BOARD_LIVE_TTL : BOARD_TTL);
+    if (done) await appCache.set(key, sb).catch(() => {});
+    return sb;
+  })().finally(() => boardInflight.delete(day));
+  boardInflight.set(day, p);
+  return p;
 }
 
 // ── Recent finals (ESPN is minutes behind a final; nba.com's logs can be hours) ──

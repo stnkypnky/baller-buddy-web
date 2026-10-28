@@ -2,8 +2,9 @@
 // (happy-dom drops "forbidden" request headers like Origin; the Worker sees them.)
 /** The Worker's routing, proxy allowlist and push endpoints (offline). */
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { route } from "../worker/index";
+import { brokenJson, edgeTtl, handleProxy, proxyRule } from "../worker/lib/proxy";
 
 class FakeKV {
   data = new Map<string, string>();
@@ -91,5 +92,65 @@ describe("worker routes", () => {
     expect((await route(post("/api/push/test", { endpoint: "https://push.example/other" }, PASS), env)).status).toBe(404);
     expect((await route(post("/api/push/unsubscribe", { endpoint: sub.endpoint }), env)).status).toBe(200);
     expect(Object.keys(JSON.parse(env.PUSH.data.get("subs")))).toEqual([]);
+  });
+});
+
+describe("ESPN scoreboard through the proxy", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  class FakeEdge {
+    store = new Map<string, Response>();
+    async match(r: Request) {
+      return this.store.get(r.url)?.clone();
+    }
+    async put(r: Request, res: Response) {
+      this.store.set(r.url, res);
+    }
+  }
+  const BOARD = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard";
+  const ask = (dates: string, edge?: FakeEdge) =>
+    handleProxy(new Request(`https://app.test/api/proxy?url=${encodeURIComponent(`${BOARD}?dates=${dates}`)}`), edge as any);
+  const upstream = (body: string) => {
+    const calls: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (u: string) => (calls.push(u), new Response(body, { headers: { "content-type": "application/json" } }))));
+    return calls;
+  };
+
+  it("keeps a long-finished day at the edge for a day, and a current one for seconds", () => {
+    const now = new Date("2026-10-28T23:00:00Z"); // 7 PM Eastern
+    const rule = proxyRule(new URL(BOARD))!;
+    expect(edgeTtl(new URL(`${BOARD}?dates=20261026`), rule, now)).toBe(86400);
+    expect(edgeTtl(new URL(`${BOARD}?dates=20261027`), rule, now)).toBe(86400);
+    expect(edgeTtl(new URL(`${BOARD}?dates=20261028`), rule, now)).toBe(15);
+    // just after midnight, last night's late games may still be on
+    expect(edgeTtl(new URL(`${BOARD}?dates=20261027`), rule, new Date("2026-10-28T04:30:00Z"))).toBe(15);
+    expect(edgeTtl(new URL("https://site.api.espn.com/apis/site/v2/sports/basketball/nba/news"), proxyRule(new URL(BOARD))!)).toBe(0);
+  });
+
+  it("serves every device one request per finished day", async () => {
+    const calls = upstream('{"events":[]}');
+    const edge = new FakeEdge();
+    for (let i = 0; i < 3; i++) {
+      const r = await ask("20261020", edge);
+      expect(r.status).toBe(200);
+      expect(await r.json()).toEqual({ events: [] });
+    }
+    expect(calls).toHaveLength(1);
+  });
+
+  it("turns an empty or cut-off answer into a clear 502 and never caches it", async () => {
+    expect(brokenJson("")).toBe(true);
+    expect(brokenJson('{"events":[{"id":1,"name":"Bos')).toBe(true);
+    expect(brokenJson('{"events":[]}\n')).toBe(false);
+    const edge = new FakeEdge();
+    const calls = upstream("");
+    const r = await ask("20261020", edge);
+    expect(r.status).toBe(502);
+    expect(await r.text()).toBe("empty response from site.api.espn.com (HTTP 200)");
+    expect(r.headers.get("X-Upstream-Length")).toBe("0");
+    upstream('{"events":[{"id":1,"name":"Bos');
+    expect(await (await ask("20261020", edge)).text()).toContain("incomplete response");
+    expect(edge.store.size).toBe(0);
+    expect(calls).toHaveLength(1);
   });
 });
