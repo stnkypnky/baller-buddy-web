@@ -14,6 +14,7 @@ export const DEFAULTS = {
     ollama_url: "http://localhost:11434/v1",
     no_tools: [] as string[], // "provider:model" pairs that rejected tool calls
     web_default: false,
+    factcheck: true, // check named players against current data, revise once if needed
   },
   alerts: {
     enabled: true,

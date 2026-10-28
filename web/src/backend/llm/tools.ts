@@ -33,7 +33,8 @@ export const SPECS: ToolSpec[] = [
     name: "get_game_previews",
     description:
       "Every game on a date in one call: tip time, records, seeds, last 10, net ratings, players out, betting line, " +
-      "the app's estimated winner and win %, season series; scores for live/final games. For matchups, previews, predictions.",
+      "the app's estimated winner and win %, season series; for live/final games the score (OT, close, blowout) and each team's leaders. " +
+      "For matchups, previews, predictions, and which past games were worth watching.",
     parameters: { type: "object", properties: {
       date: { type: "string", description: "YYYY-MM-DD; omit for today." },
       team: { ...TEAM, description: "Only this team's game." },
@@ -266,8 +267,9 @@ const scoreLine = (g: data.LiveGame) => ({
   status: g.state === "post" ? "final" : g.state === "in" ? "live" : "scheduled",
   detail: g.status_text,
   tip_utc: g.date_utc,
-  away: { team: g.away.app_name, abbr: g.away.abbr, score: g.away.score, record: g.away.record },
-  home: { team: g.home.app_name, abbr: g.home.abbr, score: g.home.score, record: g.home.record },
+  ...(g.state !== "pre" ? { result: scoreTags(g) } : {}),
+  away: { team: g.away.app_name, abbr: g.away.abbr, score: g.away.score, record: g.away.record, leaders: leaderText(g.away) || undefined },
+  home: { team: g.home.app_name, abbr: g.home.abbr, score: g.home.score, record: g.home.record, leaders: leaderText(g.home) || undefined },
 });
 
 function playerBio(b: Record<string, any>) {
@@ -311,6 +313,22 @@ export function estimate(homeNet: number, awayNet: number) {
 
 const signed = (n: number) => (n >= 0 ? "+" : "") + n.toFixed(1);
 const lastName = (n: string) => n.split(" ").filter((w) => !/^(jr\.?|sr\.?|ii|iii|iv)$/i.test(w)).at(-1) ?? n;
+
+/** "DEN 112 @ BKN 110 (OT, close)": score with what made the game notable. */
+export function scoreTags(g: data.LiveGame) {
+  const a = Number(g.away.score) || 0;
+  const h = Number(g.home.score) || 0;
+  const tags = [g.period > 4 ? (g.period > 5 ? `${g.period - 4}OT` : "OT") : "", g.state === "post" && Math.abs(a - h) <= 5 ? "close" : "", g.state === "post" && Math.abs(a - h) >= 20 ? "blowout" : ""].filter(Boolean);
+  return `${g.away.abbr} ${g.away.score} @ ${g.home.abbr} ${g.home.score}${tags.length ? ` (${tags.join(", ")})` : ""}`;
+}
+
+/** "BKN: Porter Jr. 31 pts, Claxton 12 reb, Thomas 7 ast" from the scoreboard's leaders. */
+export function leaderText(side: data.EspnSide) {
+  const ls = side.leaders ?? [];
+  if (!ls.length) return "";
+  const unit = { PTS: "pts", REB: "reb", AST: "ast" } as const;
+  return `${side.abbr}: ${ls.map((l) => `${l.player} ${l.value} ${unit[l.category]}`).join(", ")}`;
+}
 
 async function previews(games: data.LiveGame[], cache: Cache): Promise<string[]> {
   const s = currentSeason();
@@ -368,7 +386,9 @@ async function previews(games: data.LiveGame[], cache: Cache): Promise<string[]>
         parts.push(`estimate ${fav} by ${Math.max(1, Math.round(Math.abs(margin)))}, ${Math.round(Math.max(homeWin, 1 - homeWin) * 100)}%`);
       }
     } else {
-      parts.unshift(`${g.state === "post" ? "FINAL" : `LIVE ${g.status_text}`}: ${g.away.abbr} ${g.away.score} @ ${g.home.abbr} ${g.home.score}`);
+      parts.unshift(`${g.state === "post" ? "FINAL" : `LIVE ${g.status_text}`}: ${scoreTags(g)}`);
+      const lead = [leaderText(g.away), leaderText(g.home)].filter(Boolean);
+      if (lead.length) parts.push(lead.join(" · "));
     }
     const ser = series(home.t, away.t);
     if (ser) parts.push(ser);

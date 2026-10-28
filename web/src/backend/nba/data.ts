@@ -717,6 +717,12 @@ export function fetchLeagueScoreboard(season: string, cache: Cache, seasonType: 
   );
 }
 
+export interface GameLeader {
+  category: "PTS" | "REB" | "AST";
+  player: string;
+  value: string;
+}
+
 export interface EspnSide {
   espn_id: number;
   app_name: string;
@@ -724,6 +730,22 @@ export interface EspnSide {
   short: string;
   score: string;
   record: string;
+  /** This side's points/rebounds/assists leaders (scoreboards only). */
+  leaders?: GameLeader[];
+}
+
+const LEADER_CATS: Record<string, GameLeader["category"]> = { points: "PTS", rebounds: "REB", assists: "AST" };
+
+/** A scoreboard competitor's leaders; ESPN shapes vary, so anything missing is skipped. */
+export function espnLeaders(c: any): GameLeader[] {
+  const out: GameLeader[] = [];
+  for (const l of Array.isArray(c?.leaders) ? c.leaders : []) {
+    const category = LEADER_CATS[String(l?.name ?? l?.displayName ?? "").toLowerCase()];
+    const top = l?.leaders?.[0];
+    const player = top?.athlete?.displayName ?? top?.athlete?.fullName ?? "";
+    if (category && player && !out.some((x) => x.category === category)) out.push({ category, player, value: String(top?.displayValue ?? top?.value ?? "") });
+  }
+  return out;
 }
 
 function espnSide(c: any): EspnSide {
@@ -737,6 +759,7 @@ function espnSide(c: any): EspnSide {
     short: t.shortDisplayName ?? "",
     score: String(c?.score ?? "0"),
     record: (rec[0] ?? {}).summary ?? "",
+    leaders: espnLeaders(c),
   };
 }
 

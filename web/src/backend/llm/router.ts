@@ -13,6 +13,8 @@ import { findTeam, getTeamName } from "../nba/teams";
 import * as pulse from "../pulse";
 import * as settings from "../settings";
 import * as anthropicAdapter from "./anthropicAdapter";
+import { checkAnswer, correctionSheet } from "./factcheck";
+import { ground, playerIndex, shiftDay, type PlayerIndex } from "./grounding";
 import * as openaiAdapter from "./openaiAdapter";
 import { ToolsUnsupported, type ChatMessage } from "./openaiAdapter";
 import * as providers from "./providers";
@@ -23,6 +25,13 @@ const MAX_MSG_CHARS = 12000;
 /** Tool results for local models: small context windows. */
 const LOCAL_RESULT_CHARS = 4000;
 const TODAY_LINES = 15;
+/** Fact cards per question, and data carried from earlier turns (characters). */
+const GROUND_BUDGET = { local: 3000, cloud: 7000 };
+const EARLIER_BUDGET = { local: 3000, cloud: 6000 };
+const DIGEST_CHARS = 2500;
+const GROUND_TIMEOUT_MS = 20_000;
+/** The user doubts an answer: fetch fresh and don't lean on earlier data. */
+const RECHECK = /\b(re-?check|double[- ]check|are you sure|that'?s (wrong|not right|incorrect)|not (on|with) the|isn'?t on|no longer|wrong team)\b/i;
 
 export const OFF_TOPIC_REPLY = "I'm Baller Buddy's NBA analyst — ask me anything about the NBA.";
 
@@ -42,10 +51,11 @@ const BASE_PERSONA =
   "and fun to read, like a great beat writer who also knows the numbers. Today is {today}.";
 
 const CHAT_RULES =
-  "Answer from data, never from memory: fetch it with your tools (or read it from TODAY'S NBA GAMES below), " +
-  "and never invent a number, score, record or play. If a tool fails or doesn't have it, say what couldn't be " +
-  "loaded instead of guessing. Call several tools when a question needs it; never tell the user to look " +
-  "something up or name a tool to them.\n" +
+  "Your training knowledge of rosters, trades, injuries and results is out of date. Only the DATA blocks, " +
+  "TODAY'S NBA GAMES and tool results are true. Never name a player as on a team, in a game, or doing something " +
+  "unless that data shows it, and never invent a number, score, record or play. If the data doesn't cover the " +
+  "question, call a tool; if no tool can get it, say you don't have it. Call several tools when a question needs it; " +
+  "never tell the user to look something up or name a tool to them.\n" +
   "Which tool to use:\n" +
   "- tonight's / a date's games, matchups, previews, predictions, who's favored → get_game_previews (one call covers every game)\n" +
   "- how a game went or is going → get_game_details with team=…\n" +
@@ -109,6 +119,8 @@ export interface ChatRequest {
   mode?: "chat" | "matchup" | "brief" | "recap";
   focus?: string | null;
   context?: string | null;
+  /** Data digests from earlier assistant turns of this chat, oldest first. */
+  data_digests?: string[] | null;
   web?: boolean;
   event_id?: string | null;
 }
@@ -169,8 +181,12 @@ export async function buildSystem(req: ChatRequest, cache: Cache, withTools: boo
 
 /** Today's slate, one line per game, so "the game tonight" needs no lookup. */
 async function todayBlock(teamId?: number | null) {
+  const today = data.nbaToday();
+  const named = (d: string) =>
+    `${new Date(`${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}T12:00:00Z`).toLocaleDateString("en-US", { weekday: "long", timeZone: "UTC" })} ${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}`;
+  const dates = `\n\nDATES (NBA, Eastern): today ${named(today)}; yesterday ${named(shiftDay(today, -1))}; tomorrow ${named(shiftDay(today, 1))}. Tools take date=YYYY-MM-DD.`;
   const sb = await data.fetchScoreboard().catch(() => null);
-  if (!sb?.games.length) return "";
+  if (!sb?.games.length) return dates;
   const mine = teamId ? findTeam(getTeamName(teamId))?.espn_id : undefined;
   const line = (g: data.LiveGame) => {
     const rec = (e: data.EspnSide) => (e.record ? ` (${e.record})` : "");
@@ -184,9 +200,68 @@ async function todayBlock(teamId?: number | null) {
   };
   const lines = sb.games.slice(0, TODAY_LINES).map(line);
   return (
+    dates +
     `\n\nTODAY'S NBA GAMES (Eastern date ${sb.date.slice(0, 10) || data.nbaToday()}; scores as of this message. ` +
     `For previews and predictions call get_game_previews, for how a game went get_game_details):\n${lines.join("\n")}`
   );
+}
+
+/** Earlier turns' data, newest first, whole digests within `budget`. */
+function earlierData(digests: string[] | null | undefined, budget: number) {
+  const out: string[] = [];
+  let used = 0;
+  for (const d of [...(digests ?? [])].reverse()) {
+    if (!d || used + d.length > budget) continue;
+    out.unshift(d);
+    used += d.length;
+  }
+  return out.join("\n\n");
+}
+
+/** What this turn knew, for the next turns: its fact cards and the start of each tool result. */
+function digest(cards: string, toolTexts: string[]) {
+  const body = [cards.replace(/^DATA FOR THIS QUESTION[^\n]*\n/, ""), ...toolTexts.map((t) => t.slice(0, 600))].filter(Boolean).join("\n");
+  return body.length > DIGEST_CHARS ? body.slice(0, DIGEST_CHARS).replace(/\n[^\n]*$/, "") : body;
+}
+
+/** Check the players an answer names; on a problem, have the model rewrite it once. */
+async function* factCheck(
+  draft: string,
+  dataText: string,
+  idx: PlayerIndex,
+  run: (history: ChatMessage[]) => AsyncGenerator<{ type: string; text?: string }>,
+  history: ChatMessage[],
+): AsyncGenerator<SseEvent> {
+  yield sse("status", { text: "Checking facts…" });
+  const res = checkAnswer(draft, dataText, idx);
+  const names = res.problems.map((p) => p.player.name);
+  if (!res.problems.length) {
+    yield sse("factcheck", { checked: res.named.length, fixed: 0, names: [] });
+    return;
+  }
+  const revised: ChatMessage[] = [...history, { role: "assistant", content: draft }, { role: "user", content: correctionSheet(res.problems) }];
+  let started = false;
+  let text = "";
+  try {
+    for await (const ev of run(revised)) {
+      if (ev.type !== "token" || !ev.text) continue;
+      if (!started) {
+        started = true;
+        yield sse("revision", { names });
+      }
+      text += ev.text;
+      yield sse("token", ev);
+    }
+  } catch (e) {
+    console.warn("fact-check revision failed:", e);
+  }
+  if (!started || !text.trim()) {
+    // No usable rewrite: keep the draft, say what couldn't be confirmed.
+    if (started) yield sse("revision_restore", { text: draft });
+    yield sse("factcheck", { checked: res.named.length, fixed: 0, names, unresolved: true });
+    return;
+  }
+  yield sse("factcheck", { checked: res.named.length, fixed: res.problems.length, names });
 }
 
 async function chain(req: ChatRequest): Promise<[string, string][]> {
@@ -269,6 +344,40 @@ export async function* chatEvents(req: ChatRequest, cache: Cache, signal?: Abort
     }
   }
 
+  // Grounding: the app finds what the question is about and puts current
+  // facts in front of the model, so nothing depends on it choosing to look.
+  let idx: PlayerIndex | null = null;
+  let dataText = "";
+  let cardText = "";
+  if (mode === "chat") {
+    const users = history.filter((m) => m.role === "user");
+    const question = req.messages?.filter((m) => m.role === "user").at(-1)?.content ?? users.at(-1)!.content;
+    const previous = users.at(-2)?.content ?? "";
+    const local = !!providers.PROVIDERS[(await chain(req))[0][0]]?.local;
+    const recheck = RECHECK.test(question);
+    if (recheck) await cache.popWhere((k) => k.startsWith("roster_v5_") || k === "hub_injuries");
+    yield sse("status", { text: "Looking up current data…" });
+    try {
+      idx = await playerIndex(cache);
+      const timeout = new Promise<null>((r) => setTimeout(() => r(null), GROUND_TIMEOUT_MS));
+      const g = await Promise.race([
+        ground(question, { followed: req.team_id, cache, budget: local ? GROUND_BUDGET.local : GROUND_BUDGET.cloud, previous, index: idx }),
+        timeout,
+      ]);
+      const earlier = recheck ? "" : earlierData(req.data_digests, local ? EARLIER_BUDGET.local : EARLIER_BUDGET.cloud);
+      cardText = g?.block ?? "";
+      const block = [earlier && `DATA FROM EARLIER IN THIS CHAT (may be older than the data below):\n${earlier}`, cardText].filter(Boolean).join("\n\n");
+      if (block) {
+        const last = history.at(-1)!;
+        history[history.length - 1] = { ...last, content: `${last.content}\n\n${block}` };
+        dataText = block;
+      }
+      if (g?.cards.length) yield sse("grounding", { labels: g.cards.map((c) => c.label) });
+    } catch (e) {
+      console.warn("grounding failed:", e);
+    }
+  }
+
   // Small models drift off topic more easily: remind them on the turn itself.
   if (mode === "chat") {
     const last = history.at(-1)!;
@@ -284,6 +393,7 @@ export async function* chatEvents(req: ChatRequest, cache: Cache, signal?: Abort
   };
   for (const m of history) noteIds(m.content);
   const viewTeam = req.team_id ? getTeamName(req.team_id) : "";
+  const toolTexts: string[] = [];
 
   const toolRunner = (pid: string) => {
     const limit = providers.get(pid).local ? LOCAL_RESULT_CHARS : tools.MAX_RESULT_CHARS;
@@ -302,6 +412,7 @@ export async function* chatEvents(req: ChatRequest, cache: Cache, signal?: Abort
       }
       const out = await tools.execute(name, args, cache, limit);
       noteIds(out[0]);
+      toolTexts.push(`[${name}] ${out[0]}`);
       return out;
     };
   };
@@ -329,10 +440,16 @@ export async function* chatEvents(req: ChatRequest, cache: Cache, signal?: Abort
         const system = await buildSystem(req, cache, attemptTools);
         noteIds(system);
         const specs = attemptTools ? tools.SPECS : null;
+        let draft = "";
         for await (const ev of adapter(pid)(pid, model, system, history, specs, toolRunner(pid), signal)) {
           if (ev.type === "token" || ev.type === "reasoning" || ev.type === "tool_call") emitted = true;
+          if (ev.type === "token") draft += ev.text;
           yield sse(ev.type, ev);
         }
+        if (mode === "chat" && idx && ai.factcheck !== false && draft.trim() && !draft.includes(OFF_TOPIC_REPLY)) {
+          yield* factCheck(draft, [system, dataText, ...toolTexts].join("\n"), idx, (h) => adapter(pid)(pid, model, system, h, null, toolRunner(pid), signal), history);
+        }
+        if (mode === "chat") yield sse("digest", { text: digest(cardText, toolTexts) });
         yield sse("done", { provider: pid, model });
         return;
       } catch (e) {

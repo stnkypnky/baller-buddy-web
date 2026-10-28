@@ -33,6 +33,12 @@ export interface Turn {
   stopped?: boolean;
   /** The latest event kind, so the indicator can say what's happening now. */
   last?: string;
+  /** What the app looked up before the model answered ("Paul George", "Celtics"). */
+  grounding?: string[];
+  /** The fact-check: how many named players were checked, and which were fixed. */
+  factcheck?: { checked: number; fixed: number; names: string[]; unresolved?: boolean };
+  /** This turn's data, sent with later questions so follow-ups keep it. */
+  digest?: string;
 }
 
 const CLOSE_TAGS = ["</think>", "</thought>", "</thinking>", "</reasoning>"];
@@ -64,6 +70,7 @@ export interface ChatRequest {
   provider?: string;
   model?: string;
   event_id?: string;
+  data_digests?: string[];
 }
 
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -90,6 +97,17 @@ export function applyEvent(t: Turn, event: string, data: any): Turn {
       };
     case "status":
       return { ...t, status: [...(t.status ?? []), data.text], last: event };
+    case "grounding":
+      return { ...t, grounding: data.labels ?? [], last: event };
+    case "revision":
+      // the fact-checked rewrite replaces the draft as it streams in
+      return { ...t, content: "", status: [...(t.status ?? []), `Correcting ${(data.names ?? []).join(", ")}…`], last: event };
+    case "revision_restore":
+      return { ...t, content: data.text ?? t.content, last: event };
+    case "factcheck":
+      return { ...t, factcheck: data, last: event };
+    case "digest":
+      return { ...t, digest: data.text ?? "" };
     case "error":
       return { ...t, error: data.message, streaming: false, finishedAt: t.finishedAt ?? now };
     case "done":
@@ -130,6 +148,7 @@ export async function sendChat(text: string, req: ChatRequest) {
   const history = store.turns
     .filter((t) => t.content.trim() && !t.error)
     .map((t) => ({ role: t.role, content: t.content }));
+  const digests = store.turns.filter((t) => t.role === "assistant" && t.digest).map((t) => t.digest!);
   const user: Turn = { id: uid(), role: "user", content: text.trim() };
   const bot: Turn = { id: uid(), role: "assistant", content: "", streaming: true, startedAt: Date.now() };
   store.setTurns((ts) => [...ts, user, bot]);
@@ -139,7 +158,7 @@ export async function sendChat(text: string, req: ChatRequest) {
     useChatStore.getState().setTurns((ts) => ts.map((t) => (t.id === bot.id ? fn(t) : t)));
   let aborted = false;
   try {
-    for await (const ev of sse("/ai/chat", { ...req, mode: "chat", messages: [...history, { role: "user", content: user.content }] }, chatAbort.signal)) {
+    for await (const ev of sse("/ai/chat", { ...req, mode: "chat", messages: [...history, { role: "user", content: user.content }], data_digests: digests }, chatAbort.signal)) {
       update((t) => applyEvent(t, ev.event, ev.data));
     }
   } catch (e) {
@@ -221,6 +240,7 @@ export interface AiSettings {
   custom_base_url: string;
   no_tools: string[];
   web_default: boolean;
+  factcheck: boolean;
 }
 
 export interface ModelInfo {

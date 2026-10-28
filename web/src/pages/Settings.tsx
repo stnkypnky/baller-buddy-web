@@ -332,6 +332,14 @@ function Fallbacks() {
           <Plus className="size-4" /> Add
         </Button>
       </div>
+      <div className="mt-3 border-t border-line pt-2">
+        <Toggle
+          checked={data.settings.factcheck !== false}
+          onChange={(v) => put("/ai/settings", { factcheck: v }).then(() => qc.invalidateQueries({ queryKey: ["ai-providers"] }))}
+          label="Fact-check answers"
+          hint="Checks every player an answer names against this season's data, and has the model fix any mix-ups. Adds a second pass only when something's off."
+        />
+      </div>
       {!!data.settings.no_tools.length && (
         <div className="mt-4 flex items-center justify-between rounded-xl border border-line bg-black/20 px-3 py-2 text-xs text-muted">
           <span>Snapshot mode (no tools) for: {data.settings.no_tools.join(", ")}</span>

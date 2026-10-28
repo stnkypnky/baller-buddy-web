@@ -10,6 +10,7 @@ import {
   ChevronDown,
   ClipboardList,
   Cpu,
+  Database,
   Globe,
   HeartPulse,
   History,
@@ -19,6 +20,8 @@ import {
   Radio,
   Search,
   Settings2,
+  ShieldAlert,
+  ShieldCheck,
   Square,
   Swords,
   Target,
@@ -58,12 +61,23 @@ const TOOL_ICONS: Record<string, ReactNode> = {
   web_search: <Globe />,
 };
 
-export function ToolChips({ tools }: { tools?: ToolChip[] }) {
-  if (!tools?.length) return null;
+export function ToolChips({ tools, lookedUp }: { tools?: ToolChip[]; lookedUp?: string[] }) {
+  if (!tools?.length && !lookedUp?.length) return null;
   return (
     <div className="mb-3 flex flex-wrap gap-1.5">
+      {/* What the app looked up before the model answered */}
+      {lookedUp?.map((l) => (
+        <span
+          key={`g-${l}`}
+          className="inline-flex items-center gap-1.5 rounded-full border border-line bg-white/[0.04] px-2.5 py-1 text-[11px] font-medium text-fg/80 [&>svg]:size-3.5"
+          title="Current data the app looked up for this question"
+        >
+          <Database className="text-team-text" />
+          {l}
+        </span>
+      ))}
       <AnimatePresence initial={false}>
-        {tools.map((t) => (
+        {(tools ?? []).map((t) => (
           <motion.span
             key={t.id}
             layout
@@ -161,7 +175,7 @@ export function AssistantBody({ turn }: { turn: Turn }) {
           ))}
         </div>
       )}
-      <ToolChips tools={turn.tools} />
+      <ToolChips tools={turn.tools} lookedUp={turn.grounding} />
       {showReasoning && <Thinking text={turn.reasoning} active={!!turn.streaming && !turn.content && !!turn.reasoning} />}
       {turn.content && <Markdown text={turn.content} />}
       {turn.error && (
@@ -180,8 +194,10 @@ function WorkingIndicator({ turn }: { turn: Turn }) {
   const pending = [...(turn.tools ?? [])].reverse().find((t) => !t.done);
   const lastStatus = turn.status?.[turn.status.length - 1];
   const phase =
-    turn.last === "status" && lastStatus
+    (turn.last === "status" || turn.last === "revision") && lastStatus
       ? lastStatus
+      : turn.last === "grounding" && turn.grounding?.length
+        ? `Looked up ${turn.grounding.slice(0, 3).join(", ")}…`
       : pending
         ? `Pulling ${(TOOL_LABELS[pending.name] ?? "data").toLowerCase()}…`
         : turn.last === "token"
@@ -220,7 +236,29 @@ function DoneLine({ turn }: { turn: Turn }) {
       {turn.stopped ? <Square className="size-3 text-muted" /> : <CheckCircle2 className="size-3.5 text-win" />}
       {turn.stopped ? "Stopped" : `Done in ${secs}s`}
       {who}
+      <FactCheckBadge turn={turn} />
     </div>
+  );
+}
+
+/** How the fact-check went: every player the answer named, checked against current data. */
+function FactCheckBadge({ turn }: { turn: Turn }) {
+  const f = turn.factcheck;
+  if (!f || turn.stopped) return null;
+  if (f.unresolved) {
+    return (
+      <span className="ml-1 inline-flex items-center gap-1 text-warn" title={`Couldn't confirm: ${f.names.join(", ")}`}>
+        <ShieldAlert className="size-3.5" /> Couldn't confirm {f.names.length} player{f.names.length === 1 ? "" : "s"}
+      </span>
+    );
+  }
+  return (
+    <span
+      className="ml-1 inline-flex items-center gap-1 text-win/90"
+      title={f.fixed ? `Corrected: ${f.names.join(", ")}` : f.checked ? `Every player named was checked against current data` : "No players named"}
+    >
+      <ShieldCheck className="size-3.5" /> Fact-checked{f.fixed ? ` · fixed ${f.fixed}` : ""}
+    </span>
   );
 }
 
