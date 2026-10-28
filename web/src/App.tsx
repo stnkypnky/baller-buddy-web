@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "motion/react";
 import { Component, lazy, Suspense, useEffect, useState, type ReactNode } from "react";
 import { Route, Routes, useLocation, useNavigate } from "react-router-dom";
-import { BallMark, BottomNav, Sidebar, TitleBar, TopBar } from "./components/shell";
+import { BallMark, BottomNav, SectionTabs, Sidebar, TitleBar, TopBar } from "./components/shell";
 import { Skeleton } from "./components/ui";
 import { api } from "./lib/api";
 import { useSelection } from "./lib/queries";
@@ -61,6 +61,7 @@ export default function App() {
           <Sidebar />
           <main className="flex min-w-0 flex-1 flex-col">
             <TopBar />
+            <SectionTabs />
             <div className="relative min-h-0 flex-1">
               <AnimatePresence mode="wait" initial={false}>
                 <motion.div

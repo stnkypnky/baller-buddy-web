@@ -392,6 +392,45 @@ const TABS: NavItem[] = [
   { to: "/ai", label: "AI", icon: <Bot /> },
 ];
 
+/** The pages each bottom tab covers. On a phone they get a switcher under
+ *  the top bar, so it's clear which one is open (the tab alone can't say). */
+const SECTIONS: { to: string; label: string }[][] = [
+  [
+    { to: "/", label: "Overview" },
+    { to: "/roster", label: "Roster" },
+    { to: "/stats", label: "Stats" },
+    { to: "/trends", label: "Trends" },
+  ],
+  [
+    { to: "/scores", label: "Scores" },
+    { to: "/league", label: "Standings" },
+    { to: "/compare", label: "Compare" },
+  ],
+];
+
+export function SectionTabs() {
+  const { pathname } = useLocation();
+  const on = (to: string) => (to === "/" ? pathname === "/" : pathname.startsWith(to));
+  const section = SECTIONS.find((sec) => sec.some((it) => on(it.to)));
+  if (!section) return null;
+  return (
+    <div className="flex shrink-0 gap-1.5 overflow-x-auto px-3 pt-0.5 pb-2.5 [scrollbar-width:none] sm:hidden">
+      {section.map((it) => (
+        <NavLink
+          key={it.to}
+          to={it.to}
+          className={cx(
+            "shrink-0 rounded-full border px-3.5 py-1.5 text-[13px] font-semibold transition-colors",
+            on(it.to) ? "border-transparent bg-team text-team-on" : "border-line bg-surface text-fg/75",
+          )}
+        >
+          {it.label}
+        </NavLink>
+      ))}
+    </div>
+  );
+}
+
 /** Under 640px the sidebar becomes a bottom tab bar plus a "More" sheet with
  *  every page (the Android app's layout). */
 export function BottomNav() {
