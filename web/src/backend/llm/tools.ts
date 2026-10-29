@@ -328,9 +328,15 @@ export function slateLine(g: data.LiveGame) {
 export function slateText(day: string, games: data.LiveGame[]) {
   if (!games.length) return `GAMES ON ${day}: none — no NBA games that day.`;
   const best = watchRank(games).filter((w) => w.why.length).slice(0, 3);
+  // Small models guess at tricodes (CLE as the Celtics, NO as the Nuggets): spell every one out.
+  const key = [...new Map(games.flatMap((g) => [g.away, g.home]).map((s) => [s.abbr, ESPN_ID_TO_NAME[s.espn_id] ?? s.app_name])).entries()]
+    .filter(([, name]) => name)
+    .map(([abbr, name]) => `${abbr} = ${name}`)
+    .join(", ");
   return (
     `GAMES ON ${day} — every NBA game that day (${games.length}); there were no others, and a team not listed didn't play:\n` +
     games.map((g) => `- ${slateLine(g)}`).join("\n") +
+    (key ? `\nTEAMS: ${key}. No other team plays that day.` : "") +
     (best.length ? `\nBEST TO WATCH (the app's ranking): ${best.map((w) => `${w.game.away.abbr} @ ${w.game.home.abbr} (${w.why.join(", ")})`).join("; ")}` : "")
   );
 }

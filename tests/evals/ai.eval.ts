@@ -52,6 +52,8 @@ const CASES: Case[] = [
   },
   { id: "top-scorer", q: "Who was the top scorer in the Lakers game yesterday?", must: [/Doncic|Dončić/, /35/] },
   { id: "best-to-watch", q: "Which game from yesterday was the best one to watch?", must: [/Nuggets|Warriors|Denver|Golden State/, /OT|overtime/i] },
+  // from a report: CLE read as the Celtics, SAC/NO as the Suns/Nuggets
+  { id: "watch-today", q: "What to watch today", must: [/Hawks|Atlanta/, /6\.5/], never: [/Knicks|Bulls|Lakers|Suns|Nuggets|Warriors|Mavericks|Pacers|Cavaliers/] },
   { id: "pg-team", q: "What team does Paul George play for?", must: [/Celtics|Boston/], never: [/Clippers|76ers|Sixers|Pacers|Thunder/] },
   { id: "leading-scorer", q: "Who's our leading scorer?", must: [/Tatum/, /27/] },
   { id: "injury", q: "Is Porzingis playing tonight?", must: [/\bout\b|won'?t play|not play|sidelined|injur/i, /ankle/i] },

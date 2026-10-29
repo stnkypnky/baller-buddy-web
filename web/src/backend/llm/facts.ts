@@ -26,6 +26,8 @@ const GAMES = /\b(games?|scores?|results?|final|slate|played|play|won|wins?|lost
 const STANDINGS = /\b(standings?|seeds?|seeded|seeding|rank(?:ed|ing)?|place in|stand(?:s)? in|playoff (?:picture|race)|top of the (?:east|west)|in the (?:east|west))\b/;
 const NUMBERS = /\b(stats?|numbers|averag\w*|ppg|how(?:'s| is)? .{0,30}(?:playing|doing)|stat line|line this season|shooting)\b/;
 
+/** "Cavaliers", not "CLE": a tricode is a guess for a small model (and a squint on a phone). */
+const nick = (s: data.EspnSide) => TEAMS.find((t) => t.espn_id === s.espn_id)?.nickname ?? s.abbr;
 const pts = (l?: data.GameLeader) => (l ? `${l.player.split(" ").slice(1).join(" ") || l.player} ${l.value}` : "");
 
 /** One day's games: every game, its result or tip time, its top scorers. */
@@ -43,12 +45,12 @@ async function dayTable(day: string, teams: Team[]): Promise<FactTable | null> {
       g.state === "pre"
         ? `${g.status_text}${g.odds?.details ? ` · ${g.odds.details}` : ""}`
         : `${g.away.score}–${g.home.score} ${g.state === "post" ? (g.period > 4 ? `F/${g.period > 5 ? g.period - 4 : ""}OT` : "F") : g.status_text}`;
-    return [`${g.away.abbr} @ ${g.home.abbr}`, result, leaders];
+    return [`${nick(g.away)} @ ${nick(g.home)}`, result, leaders];
   });
   const notes: string[] = [];
   if (missing.length) notes.push(`${missing.map((t) => `The ${t.nickname}`).join(" and ")} didn't play that day.`);
   const best = watchRank(mine).filter((w) => w.why.length)[0];
-  if (best && mine.filter((g) => g.state === "post").length > 1) notes.push(`Best watch: ${best.game.away.abbr} @ ${best.game.home.abbr} — ${best.why.join(", ")}`);
+  if (best && mine.filter((g) => g.state === "post").length > 1) notes.push(`Best watch: ${nick(best.game.away)} @ ${nick(best.game.home)} — ${best.why.join(", ")}`);
   if (!rows.length) return { title, source: "ESPN", columns: [], rows: [], note: notes.join(" ") };
   return { title, source: "ESPN", columns: ["Game", "Result", "Top scorers"], rows, note: notes.join(" ") || undefined };
 }

@@ -41,6 +41,8 @@ export interface Claim {
   hint: string;
   /** The sentence or table row it's in. */
   where?: string;
+  /** A game claim's teams that don't play on the day the data lists ("Suns", "Nuggets"). */
+  idle?: string[];
 }
 
 export interface CheckResult {
@@ -69,7 +71,8 @@ const wordIn = (text: string, w: string) => new RegExp(`(^|[^a-z0-9])${escape(w)
 /** Sentences of an answer (Markdown bullets and table rows count as sentences). */
 const sentences = (text: string) =>
   text
-    .split(/(?<=[.!?])\s+(?=[A-Z*_\d])|\n+|\|/)
+    // not after "vs." or "Jr.": "Celtics vs. Hawks" is one sentence
+    .split(/(?<=[.!?])(?<!\b(?:vs|Jr|Sr|St|Mt|No|Dr|Mr)\.)\s+(?=[A-Z*_\d])|\n+|\|/)
     .map((s) => s.trim())
     .filter(Boolean);
 
@@ -359,11 +362,22 @@ function gamesIn(data: string): { text: string; teams: Team[] }[] {
     .filter((g) => g.teams.length >= 2);
 }
 
+/** Two teams written as a game: "Celtics vs. Hawks", "BOS @ ATL", "Boston at Atlanta". */
+function matchupIn(row: string, [a, b]: Team[]): boolean {
+  const names = (t: Team) => [t.nickname, t.full_name, t.city, t.abbreviation].map((n) => escape(fold(n))).join("|");
+  const f = fold(row).replace(/\*+/g, "");
+  const joined = (x: Team, y: Team) => new RegExp(`\\b(?:${names(x)})\\W{0,3}(?:vs|versus|@|at)\\W{0,3}(?:the )?(?:${names(y)})\\b`).test(f);
+  return joined(a, b) || joined(b, a);
+}
+
 /** "BOS 125 @ ATL 124; NYK 101 @ CHI 99": the finished games the data has, for the sheet. */
 function slate(data: string): string {
   const out = new Set<string>();
   for (const m of data.matchAll(/FINAL: ([A-Z]{2,4} \d+ @ [A-Z]{2,4} \d+)|"result":"([^"]+)"/g)) out.add(m[1] ?? m[2]);
-  return out.size ? `the games in the data are ${[...out].slice(0, 15).join("; ")}` : "";
+  // games not played yet: "CLE (3-1) @ ATL (2-3) · 8:00 PM"
+  for (const m of data.matchAll(/^- ([A-Z]{2,4}) \([\d-]+\) @ ([A-Z]{2,4}) \([\d-]+\)/gm)) out.add(`${m[1]} @ ${m[2]}`);
+  const key = /^TEAMS: (.+)$/m.exec(data)?.[1];
+  return out.size ? `the games in the data are ${[...out].slice(0, 15).join("; ")}${key ? ` (${key})` : ""}` : "";
 }
 
 /** Games the answer describes (two teams, plus a score or a player's line):
@@ -373,6 +387,11 @@ function checkGames(answer: string, dataText: string, named: IndexedPlayer[], op
   const problems: Problem[] = [];
   const claims: Claim[] = [];
   const known = gamesIn(dataText);
+  const slateShown = /GAMES ON \d{4}-\d\d-\d\d|^Games on /m.test(dataText);
+  // the teams that play on the day(s) the data lists
+  const slateTeams = new Set(
+    [...dataText.matchAll(/^- (?:FINAL: |LIVE [^:\n]*: )?[A-Z]{2,4}[ (\d][^\n]*$/gm), ...dataText.matchAll(/^TEAMS: [^\n]*$/gm)].flatMap((m) => teamsIn(m[0])),
+  );
   for (const row of rows(answer)) {
     if (SPECULATIVE.test(row)) continue;
     const ts = findTeams(row);
@@ -381,10 +400,13 @@ function checkGames(answer: string, dataText: string, named: IndexedPlayer[], op
     const scores = [...plain.matchAll(SCORE)].filter((m) => isScore(+m[1], +m[2]));
     // "George is averaging 18 points" next to a result is his season, not that game
     const stats = AVERAGE.test(row) ? [] : statsIn(row, plain, named);
-    if (!scores.length && !stats.some(([, p]) => p)) continue; // a matchup mentioned, not a result
+    // "Celtics vs. Hawks" on a day whose games the data lists is a claim that they play
+    const matchup = slateShown && matchupIn(row, ts);
+    if (!scores.length && !stats.some(([, p]) => p) && !matchup) continue; // a matchup mentioned, not a result
     const games = known.filter((g) => ts.every((t) => g.teams.includes(t))).map((g) => g.text);
     if (!games.length) {
-      claims.push({ kind: "game", text: `${ts[0].nickname}–${ts[1].nickname} game`, hint: slate(dataText) || "no game between these teams", where: row });
+      const idle = slateTeams.size ? ts.filter((t) => !slateTeams.has(t)).map((t) => t.nickname) : [];
+      claims.push({ kind: "game", text: `${ts[0].nickname}–${ts[1].nickname} game`, hint: slate(dataText) || "no game between these teams", where: row, idle });
       continue;
     }
     const these = games.join("\n");
@@ -463,7 +485,11 @@ function checkNumbers(answer: string, dataText: string, named: IndexedPlayer[], 
 // ── the check ────────────────────────────────────────────────────────────────
 
 /** Problems with an answer. `dataText` is everything it was built from. */
+/** Typographic dashes and spaces as plain ones ("3‑1", "–5.5"), so records and lines read as written. */
+export const plainText = (s: string) => s.replace(/[‐-―−]/g, "-").replace(/[   ]/g, " ");
+
 export function checkAnswer(answer: string, dataText: string, idx: PlayerIndex, opts: CheckOptions = {}): CheckResult {
+  answer = plainText(answer);
   const named = idx.find(answer, 12);
   const problems = checkPlayers(answer, fold(dataText), named, opts);
   const flagged = new Set(problems.map((p) => p.player.pid));
@@ -483,9 +509,15 @@ export function checkAnswer(answer: string, dataText: string, idx: PlayerIndex, 
  *  confirm (a player not in the data: every sentence naming him). Headings,
  *  table headers and the rest stay; `removed` counts what went. */
 export function trimUnconfirmed(answer: string, res: CheckResult): { text: string; removed: number } {
+  answer = plainText(answer);
   const wheres = [...res.problems, ...res.claims].map((x) => x.where?.trim()).filter((w): w is string => !!w);
+  // a bullet about a game that didn't happen goes whole: the rest of it is about that game
+  const gone = res.claims.filter((c) => c.kind === "game" && c.where).map((c) => c.where!.trim());
   const nobodies = res.problems.filter((p) => !p.where).map((p) => p.player);
-  const bad = (unit: string) => wheres.some((w) => unit.includes(w)) || nobodies.some((p) => at(unit, p) >= 0);
+  // teams put in a game on a day they don't play: anything more said about them is about that game
+  const idle = new Set(res.claims.flatMap((c) => c.idle ?? []));
+  const bad = (unit: string) =>
+    wheres.some((w) => unit.includes(w)) || nobodies.some((p) => at(unit, p) >= 0) || (idle.size > 0 && findTeams(unit).some((t) => idle.has(t.nickname)));
   let removed = 0;
   const lines = answer.split("\n").flatMap((line) => {
     if (line.includes("|")) {
@@ -494,6 +526,10 @@ export function trimUnconfirmed(answer: string, res: CheckResult): { text: strin
       return [];
     }
     const ss = sentences(line);
+    if (/^\s*(?:[-*+]|\d+\.)\s/.test(line) && gone.some((w) => ss[0]?.includes(w) || w.includes(ss[0] ?? "\0"))) {
+      removed += ss.length;
+      return [];
+    }
     const kept = ss.filter((s) => !bad(s));
     if (kept.length === ss.length) return [line];
     removed += ss.length - kept.length;

@@ -1,6 +1,7 @@
 /** Verified fact tables, the best-to-watch ranking, and taking out what the
  *  fact-check couldn't confirm. */
 
+import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Cache } from "../web/src/backend/cache";
 import { checkAnswer, trimUnconfirmed } from "../web/src/backend/llm/factcheck";
@@ -24,9 +25,9 @@ describe("fact tables", () => {
 
   it("lists every game of the day asked about, with the best one to watch", async () => {
     const [t] = await facts("How did the games turn out yesterdat");
-    expect(t.rows.map((r) => r[0])).toEqual(["NY @ CHI", "LAL @ PHX", "DEN @ GS"]);
-    expect(t.rows[2]).toEqual(["DEN @ GS", "125–121 F/OT", "Jokic 31 · Curry 34"]);
-    expect(t.note).toBe("Best watch: DEN @ GS — overtime, a 4-point game, 246 total points");
+    expect(t.rows.map((r) => r[0])).toEqual(["Knicks @ Bulls", "Lakers @ Suns", "Nuggets @ Warriors"]);
+    expect(t.rows[2]).toEqual(["Nuggets @ Warriors", "125–121 F/OT", "Jokic 31 · Curry 34"]);
+    expect(t.note).toBe("Best watch: Nuggets @ Warriors — overtime, a 4-point game, 246 total points");
   });
 
   it("says when the team asked about didn't play", async () => {
@@ -37,7 +38,7 @@ describe("fact tables", () => {
 
   it("shows tonight's game with its line", async () => {
     const [t] = await facts("Who wins tonight, Celtics or Hawks?");
-    expect(t.rows).toEqual([["ATL @ BOS", "7:30 PM ET · BOS -6.5", ""]]);
+    expect(t.rows).toEqual([["Hawks @ Celtics", "7:30 PM ET · BOS -6.5", ""]]);
   });
 
   it("shows the standings and a player's numbers", async () => {
@@ -55,7 +56,7 @@ describe("fact tables", () => {
   it("gives the model the table as text", async () => {
     const text = factsText(await facts("yesterday's scores"));
     expect(text).toContain("(ESPN; complete)");
-    expect(text).toContain("- NY @ CHI · Result 101–99 F · Top scorers Brunson 33 · White 27");
+    expect(text).toContain("- Knicks @ Bulls · Result 101–99 F · Top scorers Brunson 33 · White 27");
   });
 });
 
@@ -84,6 +85,24 @@ describe("taking out what couldn't be confirmed", () => {
     expect(text).toContain("| Knicks @ Bulls | 101-99 |");
     expect(text).not.toContain("Celtics");
     expect(text).toContain("The Knicks hung on late.");
+  });
+});
+
+describe("reported answers", () => {
+  beforeEach(() => serveWorld());
+
+  // "What to watch today" on gpt-oss-20b: CLE read as the Celtics, SAC/NO as
+  // the Suns/Nuggets, MEM/POR as the Mavericks/Pacers, records with U+2011 hyphens.
+  it("2026-10-29 what to watch: games between the wrong teams are caught and taken out", async () => {
+    const [r] = JSON.parse(readFileSync("tests/evals/reports/2026-10-29-what-to-watch.json", "utf8"));
+    const idx = await playerIndex(new Cache({ persist: false }));
+    const res = checkAnswer(r.answer, r.digest, idx);
+    expect(res.claims.filter((c) => c.kind === "game").map((c) => c.text)).toEqual(["Celtics–Hawks game", "Suns–Nuggets game", "Mavericks–Pacers game"]);
+    expect(res.claims[0].hint).toContain("CLE @ ATL");
+    const { text } = trimUnconfirmed(r.answer, res);
+    // nothing more about teams that don't play today; the rest stays
+    expect(text).not.toMatch(/Celtics|Suns|Nuggets|Mavericks|Pacers/);
+    expect(text).toContain("three games are all about early-season momentum");
   });
 });
 

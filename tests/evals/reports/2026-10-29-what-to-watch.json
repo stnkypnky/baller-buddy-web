@@ -1,0 +1,43 @@
+[
+  {
+    "at": "2026-10-29T15:57:39.828Z",
+    "question": "What to watch today",
+    "answer": "**Takeaway:**  \nTonight’s three games are all about early‑season momentum and how a few key players can tilt a close contest.\n\n- **Celtics vs. Hawks (3‑1 @ 2‑3)** – The Celtics’ backcourt is firing: Tatum at 28 ppg and George at 22.3 ppg give Boston a high‑scoring edge, while the Hawks are down by 1½ points on the line. Watch how much the Celtics can keep the pressure on Atlanta’s defense; if Tatum and George stay efficient from beyond the arc, Boston should pull ahead early.\n\n- **Suns vs. Nuggets (0‑4 @ 0‑4)** – The Nuggets’ line of –5.5 shows they’re favored, but both teams are winless. This will be a high‑scoring shootout; the Suns need to convert their three‑point attempts to stay in the game, while the Nuggets must limit turnovers to avoid giving the Suns an easy run.\n\n- **Mavericks vs. Pacers (4‑0 @ 3‑0)** – The Mavericks are on a perfect streak and the Pacers’ line of –7.5 indicates a one‑sided affair. The key will be whether the Mavericks can keep their momentum and avoid any defensive lapses that could give the Pacers a chance to snap the streak.\n\n**What to watch:**  \n- Tatum’s inside scoring and George’s perimeter shooting in the Celtics game.  \n- How many three‑point baskets the Suns can hit against a Nuggets defense that has yet to win a game.  \n- Whether the Mavericks’ offense stays balanced enough to keep their perfect record alive, especially if the Pacers pull off an upset.",
+    "model": "custom:openai/gpt-oss-20b",
+    "note": "Its mixing up cle with celtics",
+    "facts": [
+      {
+        "title": "Games on Thu, Oct 29",
+        "source": "ESPN",
+        "columns": [
+          "Game",
+          "Result",
+          "Top scorers"
+        ],
+        "rows": [
+          [
+            "CLE @ ATL",
+            "10/29 - 8:00 PM EDT · ATL -1.5",
+            ""
+          ],
+          [
+            "SAC @ NO",
+            "10/29 - 8:00 PM EDT · NO -5.5",
+            ""
+          ],
+          [
+            "MEM @ POR",
+            "10/29 - 10:00 PM EDT · POR -7.5",
+            ""
+          ]
+        ]
+      }
+    ],
+    "factcheck": {
+      "checked": 5,
+      "fixed": 0,
+      "names": []
+    },
+    "digest": "Games on Thu, Oct 29 (ESPN; complete)\n- CLE @ ATL · Result 10/29 - 8:00 PM EDT · ATL -1.5 · Top scorers \n- SAC @ NO · Result 10/29 - 8:00 PM EDT · NO -5.5 · Top scorers \n- MEM @ POR · Result 10/29 - 10:00 PM EDT · POR -7.5 · Top scorers \n\n\nGAMES ON 2026-10-29 — every NBA game that day (3); there were no others, and a team not listed didn't play:\n- CLE (3-1) @ ATL (2-3) · 10/29 - 8:00 PM EDT · line ATL -1.5 · game_id espn_401909893\n- SAC (0-4) @ NO (0-4) · 10/29 - 8:00 PM EDT · line NO -5.5 · game_id espn_401909894\n- MEM (4-0) @ POR (3-0) · 10/29 - 10:00 PM EDT · line POR -7.5 · game_id espn_401909895\n\nTEAM Boston Celtics 2026-27 · record 3-1 · East #4 · L10 3-1 · streak W 3\nROSTER (complete current roster; anyone not listed is NOT on this team): Jayson Tatum F-G 28.0 ppg, Paul George F 22.3 ppg, Derrick White G 12.5 ppg, Payton Pritchard G 13.3 ppg, Sam Hauser F 9.8 ppg, Mitchell Robinson C-F 5.5 ppg, Neemias Queta C 8.0 ppg, Jordan Walsh G 6.0 ppg, Baylor Scheierman G 3.8 ppg, Hugo González G 3.3 ppg, Luka Garza C 4.5 ppg, Mike Conley G 6.0 ppg\nlast game: Oct 27, 2026 BOS vs. BKN W 125-124\nnext game: CHI @ BOS, 2026-10-30T23:30Z"
+  }
+]
