@@ -22,7 +22,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { openKeyPage, useModels, useProviders } from "../components/AiParts";
 import { Button, Chip, cx, Item, Panel, SectionTitle, Skeleton, Spinner, Stagger, TeamLogo } from "../components/ui";
-import type { ModelInfo, ProviderInfo } from "../lib/ai";
+import { exportReports, useReports, type ModelInfo, type ProviderInfo } from "../lib/ai";
 import * as music from "../backend/music";
 import { api, del, post, put } from "../lib/api";
 import { reloadLibrary, stop as stopMusic } from "../lib/player";
@@ -265,6 +265,8 @@ function Fallbacks() {
   const [pid, setPid] = useState("");
   const [model, setModel] = useState("");
   const models = useModels(pid || undefined, !!pid);
+  const reports = useReports((s) => s.reports);
+  const clearReports = useReports((s) => s.clear);
   if (!data) return null;
   const chain = data.settings.fallbacks;
   const avail = data.providers.filter((p) => p.available);
@@ -337,9 +339,39 @@ function Fallbacks() {
           checked={data.settings.factcheck !== false}
           onChange={(v) => put("/ai/settings", { factcheck: v }).then(() => qc.invalidateQueries({ queryKey: ["ai-providers"] }))}
           label="Fact-check answers"
-          hint="Checks the players, scores, records and stats in every answer against the data it was built from, and has the model fix anything unsupported. Adds a second pass only when something's off."
+          hint="Checks the players, scores, records and stats in every answer against the data it was built from, and has the model fix anything unsupported. Anything still unconfirmed is taken out."
         />
       </div>
+      <label className="mt-3 flex items-center justify-between gap-3 border-t border-line pt-3">
+        <span className="min-w-0">
+          <span className="block text-[13px] font-medium text-fg">Model size</span>
+          <span className="block text-[11px] text-muted">Small models get the data up front, only the tools a question needs and tighter rules. Auto goes by the model's name.</span>
+        </span>
+        <select
+          value={data.settings.model_size ?? "auto"}
+          onChange={(e) => put("/ai/settings", { model_size: e.target.value }).then(() => qc.invalidateQueries({ queryKey: ["ai-providers"] }))}
+          className="h-10 shrink-0 rounded-xl border border-line bg-[#0d1017] px-3 text-[13px]"
+        >
+          <option value="auto">Auto</option>
+          <option value="small">Small</option>
+          <option value="large">Large</option>
+        </select>
+      </label>
+      {reports.length > 0 && (
+        <div className="mt-4 flex items-center justify-between gap-2 rounded-xl border border-line bg-black/20 px-3 py-2 text-xs text-muted">
+          <span>
+            {reports.length} answer{reports.length === 1 ? "" : "s"} reported as wrong
+          </span>
+          <span className="flex gap-1">
+            <Button variant="ghost" size="sm" onClick={exportReports}>
+              Export
+            </Button>
+            <Button variant="ghost" size="sm" onClick={clearReports}>
+              Clear
+            </Button>
+          </span>
+        </div>
+      )}
       {!!data.settings.no_tools.length && (
         <div className="mt-4 flex items-center justify-between rounded-xl border border-line bg-black/20 px-3 py-2 text-xs text-muted">
           <span>Snapshot mode (no tools) for: {data.settings.no_tools.join(", ")}</span>

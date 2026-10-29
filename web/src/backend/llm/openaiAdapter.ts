@@ -180,20 +180,35 @@ export async function* stream(
   runTool: RunTool,
   signal?: AbortSignal,
   maxRounds = 6,
+  /** Lower for small models (fewer made-up details); omitted when unset. */
+  temperature?: number,
 ): AsyncGenerator<AdapterEvent> {
   const [url, key, headers] = await credentials(pid);
   const messages: any[] = [{ role: "system", content: system }, ...history];
   const fnTools = (tools ?? []).map((s) => ({ type: "function", function: { name: s.name, description: s.description, parameters: s.parameters } }));
+  let temp = temperature;
 
   for (let rnd = 0; rnd <= maxRounds; rnd++) {
     const body: Record<string, unknown> = { model, messages, stream: true };
     if (fnTools.length && rnd < maxRounds) body.tools = fnTools;
-    const r = await providerFetch(`${url.replace(/\/+$/, "")}/chat/completions`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "text/event-stream", Authorization: `Bearer ${key}`, ...headers },
-      body: JSON.stringify(body),
-      signal,
-    });
+    if (temp !== undefined) body.temperature = temp;
+    const post = () =>
+      providerFetch(`${url.replace(/\/+$/, "")}/chat/completions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "text/event-stream", Authorization: `Bearer ${key}`, ...headers },
+        body: JSON.stringify(body),
+        signal,
+      });
+    let r = await post();
+    if (r.status === 400 && temp !== undefined) {
+      // some models (reasoning ones) only take their default temperature
+      const msg = await errorText(r.clone());
+      if (/temperature/i.test(msg)) {
+        temp = undefined;
+        delete body.temperature;
+        r = await post();
+      }
+    }
     if (!r.ok || !r.body) {
       const msg = await errorText(r);
       if (r.status === 400 && body.tools && looksLikeToolError(msg)) throw new ToolsUnsupported(msg);

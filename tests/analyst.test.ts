@@ -86,9 +86,10 @@ describe("games", () => {
   });
 
   it("gives scoreboard ids that get_game_details accepts", async () => {
-    const { out } = await run("get_scoreboard", {});
-    expect(out.games[0]).toMatchObject({ game_id: "espn_401800001", status: "final", home: { abbr: "BOS", score: "110" } });
-    expect((await run("get_game_details", { game_id: out.games[0].game_id })).ok).toBe(true);
+    const [text] = await tools.execute("get_scoreboard", {}, new Cache({ persist: false }));
+    expect(text).toContain("every NBA game that day (1); there were no others");
+    expect(text).toContain("FINAL: BKN 100 @ BOS 110 · game_id espn_401800001");
+    expect((await run("get_game_details", { game_id: "espn_401800001" })).ok).toBe(true);
   });
 
   it("lists tonight's final first in the game log", async () => {

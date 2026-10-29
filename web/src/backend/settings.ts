@@ -15,6 +15,7 @@ export const DEFAULTS = {
     no_tools: [] as string[], // "provider:model" pairs that rejected tool calls
     web_default: false,
     factcheck: true, // check named players against current data, revise once if needed
+    model_size: "auto" as "auto" | "small" | "large", // small models get fewer tools and tighter rules
   },
   alerts: {
     enabled: true,

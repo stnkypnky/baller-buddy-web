@@ -12,6 +12,7 @@ import {
   ClipboardList,
   Cpu,
   Database,
+  Flag,
   Globe,
   HeartPulse,
   History,
@@ -36,7 +37,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import { useNavigate } from "react-router-dom";
 import remarkGfm from "remark-gfm";
-import { TOOL_LABELS, type AiSettings, type ModelInfo, type ProviderInfo, type ToolChip, type Turn } from "../lib/ai";
+import { reportTurn, TOOL_LABELS, type AiSettings, type FactTable, type ModelInfo, type ProviderInfo, type ToolChip, type Turn } from "../lib/ai";
 import { api, openExternal, put } from "../lib/api";
 import { useApp } from "../lib/store";
 import { BallMark } from "./shell";
@@ -181,6 +182,7 @@ export function AssistantBody({ turn }: { turn: Turn }) {
       )}
       <ToolChips tools={turn.tools} lookedUp={turn.grounding} />
       {showReasoning && <Thinking text={turn.reasoning} active={!!turn.streaming && !turn.content && !!turn.reasoning} />}
+      {turn.facts?.map((t, i) => <FactsCard key={i} table={t} />)}
       {turn.content && <Markdown text={turn.content} />}
       {turn.error && (
         <div className="mt-2 flex items-start gap-2 rounded-xl border border-loss/25 bg-loss/10 px-3 py-2 text-xs text-loss">
@@ -189,6 +191,47 @@ export function AssistantBody({ turn }: { turn: Turn }) {
         </div>
       )}
       {turn.streaming ? <WorkingIndicator turn={turn} /> : <DoneLine turn={turn} />}
+    </div>
+  );
+}
+
+/** A table the app built straight from the data: shown as is, never written by the model. */
+function FactsCard({ table }: { table: FactTable }) {
+  return (
+    <div className="mb-3 overflow-hidden rounded-xl border border-line bg-white/[0.03]">
+      <div className="flex items-center justify-between gap-2 border-b border-line px-3 py-2">
+        <span className="text-xs font-semibold text-fg">{table.title}</span>
+        <span className="inline-flex shrink-0 items-center gap-1 text-[10px] text-win/90" title="Built by the app from the data, not written by the AI">
+          <ShieldCheck className="size-3" /> {table.source}
+        </span>
+      </div>
+      {table.rows.length > 0 && (
+        <div className="scroll overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="text-left text-[10px] tracking-wider text-faint uppercase">
+                {table.columns.map((c) => (
+                  <th key={c} className="px-3 py-1.5 font-medium whitespace-nowrap">
+                    {c}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="tabular">
+              {table.rows.map((r, i) => (
+                <tr key={i} className="border-t border-line/60">
+                  {r.map((c, j) => (
+                    <td key={j} className={cx("px-3 py-1.5", j === 0 ? "font-semibold whitespace-nowrap text-fg" : "text-fg/80", j === 1 && "whitespace-nowrap")}>
+                      {c}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {table.note && <div className="border-t border-line/60 px-3 py-2 text-[11px] text-muted">{table.note}</div>}
     </div>
   );
 }
@@ -241,7 +284,50 @@ function DoneLine({ turn }: { turn: Turn }) {
       {turn.stopped ? "Stopped" : `Done in ${secs}s`}
       {who}
       <FactCheckBadge turn={turn} />
+      {turn.content && !turn.stopped && <ReportButton turn={turn} />}
     </div>
+  );
+}
+
+/** "Wrong?": flag an answer, with a note, so it can become an accuracy test. */
+function ReportButton({ turn }: { turn: Turn }) {
+  const [open, setOpen] = useState(false);
+  const [note, setNote] = useState("");
+  const [sent, setSent] = useState(false);
+  if (sent) return <span className="ml-auto text-faint">Reported — thanks</span>;
+  return (
+    <Popover.Root open={open} onOpenChange={setOpen}>
+      <Popover.Trigger asChild>
+        <button className="ml-auto inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-faint hover:bg-white/[0.05] hover:text-fg">
+          <Flag className="size-3" /> Wrong?
+        </button>
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Content align="end" sideOffset={6} className="z-50 w-[min(20rem,calc(100vw-2rem))] rounded-xl border border-line bg-[#0d1017] p-3 shadow-xl">
+          <div className="mb-2 text-xs font-semibold text-fg">What's wrong with this answer?</div>
+          <textarea
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            rows={3}
+            placeholder="e.g. The Celtics didn't play yesterday"
+            className="w-full resize-none rounded-lg border border-line bg-black/30 p-2 text-xs text-fg outline-none focus:border-team-text/50"
+          />
+          <div className="mt-2 flex items-center justify-between gap-2">
+            <span className="text-[10px] text-faint">Saved on this device; export in Settings › AI.</span>
+            <button
+              onClick={() => {
+                reportTurn(turn, note);
+                setSent(true);
+                setOpen(false);
+              }}
+              className="rounded-lg bg-team px-3 py-1.5 text-xs font-semibold text-team-on hover:brightness-110"
+            >
+              Report
+            </button>
+          </div>
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
   );
 }
 
@@ -261,7 +347,7 @@ function FactCheckBadge({ turn }: { turn: Turn }) {
       className="ml-1 inline-flex items-center gap-1 text-win/90"
       title={f.fixed ? `Corrected: ${f.names.join(", ")}` : f.checked ? `${f.checked} players and numbers checked against current data` : "Nothing to check"}
     >
-      <ShieldCheck className="size-3.5" /> Fact-checked{f.fixed ? ` · fixed ${f.fixed}` : ""}
+      <ShieldCheck className="size-3.5" /> Fact-checked{f.removed ? ` · removed ${f.removed} unconfirmed` : f.fixed ? ` · fixed ${f.fixed}` : ""}
     </span>
   );
 }

@@ -270,7 +270,8 @@ route("GET", "/ai/models/{pid}", async (m, q) => {
   }
 });
 route("PUT", "/ai/settings", async (_m, _q, body) => {
-  const patch: any = pick(body, ["provider", "model", "fallbacks", "custom_base_url", "lmstudio_url", "ollama_url", "web_default", "factcheck"]);
+  const patch: any = pick(body, ["provider", "model", "fallbacks", "custom_base_url", "lmstudio_url", "ollama_url", "web_default", "factcheck", "model_size"]);
+  if (patch.model_size !== undefined && !["auto", "small", "large"].includes(patch.model_size)) delete patch.model_size;
   if ("provider" in patch) provider(patch.provider);
   for (const k of ["custom_base_url", "lmstudio_url", "ollama_url"]) {
     if (patch[k] && !/^https?:\/\//.test(patch[k])) throw new ApiError(400, "URL must start with http:// or https://");

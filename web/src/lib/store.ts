@@ -27,7 +27,7 @@ interface AppState {
 }
 
 // localStorage can throw (private mode, blocked storage) — degrade to memory.
-const safeStorage = createJSONStorage(() => ({
+export const safeStorage = createJSONStorage(() => ({
   getItem: (k: string) => {
     try {
       return localStorage.getItem(k);

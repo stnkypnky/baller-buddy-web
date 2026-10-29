@@ -12,7 +12,7 @@ import * as history from "../nba/history";
 import * as services from "../nba/services";
 import { TEAMS } from "../nba/teamData";
 import { getTeamName, type Team } from "../nba/teams";
-import { leaderText, scoreTags } from "./tools";
+import { slateText } from "./tools";
 
 // ── text helpers ─────────────────────────────────────────────────────────────
 
@@ -357,14 +357,7 @@ async function dateCard(day: string): Promise<Card> {
   const sb = await data.fetchScoreboard(day);
   const iso = isoOf(day);
   const label = new Date(`${iso}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" }) + " games";
-  if (!sb.games.length) return { label, text: `GAMES ON ${iso}: none` };
-  const line = (g: data.LiveGame) => {
-    if (g.state === "pre") return `${g.away.abbr} (${g.away.record}) @ ${g.home.abbr} (${g.home.record}) · ${g.status_text}${g.odds?.details ? ` · line ${g.odds.details}` : ""}`;
-    const lead = [leaderText(g.away), leaderText(g.home)].filter(Boolean).join(" · ");
-    return `${g.state === "post" ? "FINAL" : `LIVE ${g.status_text}`}: ${scoreTags(g)}${lead ? ` · ${lead}` : ""}`;
-  };
-  const all = `every NBA game that day (${sb.games.length}); there were no others, and a team not listed didn't play`;
-  return { label, text: `GAMES ON ${iso} — ${all}:\n${sb.games.map((g) => `- ${line(g)}`).join("\n")}` };
+  return { label, text: slateText(iso, sb.games) };
 }
 
 // ── putting it together ──────────────────────────────────────────────────────

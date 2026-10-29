@@ -10,6 +10,7 @@
     "preview": "wrangler dev",
     "typecheck": "tsc --noEmit -p web && tsc --noEmit -p web/tsconfig.sw.json && tsc --noEmit -p worker",
     "test": "vitest run",
+    "eval": "vitest run --config vitest.eval.config.ts",
     "shots": "node scripts/shots.mjs shots",
     "deploy": "wrangler deploy"
   },

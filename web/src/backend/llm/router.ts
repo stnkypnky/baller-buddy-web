@@ -14,7 +14,8 @@ import * as pulse from "../pulse";
 import * as settings from "../settings";
 import * as anthropicAdapter from "./anthropicAdapter";
 import * as nbaHistory from "../nba/history";
-import { checkAnswer, correctionSheet, issueCount, tiedPlayers, type CheckOptions, type Stints } from "./factcheck";
+import { checkAnswer, correctionSheet, issueCount, tiedPlayers, trimUnconfirmed, type CheckOptions, type Stints } from "./factcheck";
+import { factsFor, factsText, type FactTable } from "./facts";
 import { findSeasons, fold, ground, namedPlayerData, playerIndex, shiftDay, type PlayerIndex } from "./grounding";
 import * as openaiAdapter from "./openaiAdapter";
 import { ToolsUnsupported, type ChatMessage } from "./openaiAdapter";
@@ -37,6 +38,11 @@ const STINTS_TIMEOUT_MS = 10_000;
 const MAX_REVISIONS = 2;
 /** The user doubts an answer: fetch fresh and don't lean on earlier data. */
 const RECHECK = /\b(re-?check|double[- ]check|are you sure|that'?s (wrong|not right|incorrect)|not (on|with) the|isn'?t on|no longer|wrong team)\b/i;
+
+const FACTS_HEADER = "SHOWN TO THE USER ABOVE YOUR ANSWER (verified data, complete; the user already sees it):";
+const FACTS_ASK =
+  "Don't repeat that table or list it row by row. Answer in a few sentences and give your take: what stood out, why it matters, " +
+  "what to watch. Use a score, stat or player only exactly as shown, and add no game it doesn't list.";
 
 export const OFF_TOPIC_REPLY = "I'm Baller Buddy's NBA analyst — ask me anything about the NBA.";
 
@@ -82,6 +88,42 @@ const CHAT_RULES =
   "For predictions: give the betting line first, then the app's estimate, form and injuries, and call them estimates.\n" +
   "Format answers in Markdown: a one-line takeaway first, then short sections or bullets; " +
   "use a compact table when comparing several numbers. Keep it tight unless asked for depth.";
+
+// Small models: the same contract in fewer words, and no tool menu (they're
+// handed only the tools the question needs).
+const SMALL_RULES =
+  "Your memory of rosters, trades, injuries and results is out of date. Only the DATA blocks, TODAY'S NBA GAMES and tool results are true. " +
+  "Never name a player, game, score or number the data doesn't show. If the data doesn't cover it, call a tool; if none can, say you don't have it. " +
+  "Past seasons: pass season='YYYY-YY' to the tools. Opinions are welcome: base them on the data and say they're your take. " +
+  "Format in Markdown: a one-line takeaway, then a few short bullets.";
+
+// The tools a small model is offered, by what the question is about.
+const ALWAYS = ["get_scoreboard", "get_game_details", "get_player", "get_roster", "get_standings"];
+const TOOLS_BY_TOPIC: [RegExp, string[]][] = [
+  [/\b(tonight|today|tomorrow|predict\w*|who wins|favou?r\w*|line|odds|spread|preview\w*|pick|bet\w*)\b/i, ["get_game_previews"]],
+  [/\b(injur\w*|hurt|ruled out|(?:is|was|be) out|out (?:tonight|for)|questionable|doubtful|status|playing)\b/i, ["get_injuries"]],
+  [/\b(season|month|week|best games?|blowouts?|head[- ]to[- ]head|series|results)\b/i, ["get_season_games"]],
+  [/\b(record|form|streak|last \d+|game log|lately|recent\w*)\b/i, ["get_team_report", "get_team_games"]],
+  [/\b(career|all[- ]time|prime|greatest|best ever|history|historic\w*|era|legend\w*|retired)\b/i, ["get_player_career", "compare_players", "get_team_history"]],
+  [/\b(compare|vs\.?|versus|better|or)\b/i, ["compare_players", "compare_teams"]],
+  [/\b(leaders?|leads? the league|top \d+|best \w+ in the league|rank\w*)\b/i, ["get_player_leaders", "get_league_leaders"]],
+  [/\b(news|trade\w*|rumou?rs?|sign\w*|waive\w*)\b/i, ["get_news"]],
+  [/\b(next game|schedule|upcoming|when do|when is)\b/i, ["get_upcoming_games"]],
+  [/\b(why|rule|style|rivalr\w*|accolades?|awards?|mvp)\b/i, ["get_background"]],
+];
+const SMALL_MAX_TOOLS = 9;
+/** Small models stray less from the data when they sample less. */
+const SMALL_TEMPERATURE = 0.2;
+
+/** The tools for this turn: all of them for a large model; for a small one,
+ *  the few the question needs (a long menu is where small models go wrong). */
+export function toolsFor(size: "small" | "large", question: string): tools.ToolSpec[] {
+  if (size === "large") return tools.SPECS;
+  const names = [...ALWAYS];
+  for (const [re, add] of TOOLS_BY_TOPIC) if (re.test(question)) names.push(...add);
+  const pick = [...new Set(names)].slice(0, SMALL_MAX_TOOLS);
+  return tools.SPECS.filter((s) => pick.includes(s.name));
+}
 
 const MODE_PROMPTS: Record<string, string> = {
   matchup:
@@ -170,7 +212,7 @@ async function viewLine(teamId: number | null | undefined, season: string, cache
   );
 }
 
-export async function buildSystem(req: ChatRequest, cache: Cache, withTools: boolean) {
+export async function buildSystem(req: ChatRequest, cache: Cache, withTools: boolean, size: "small" | "large" = "large") {
   const season = req.season || currentSeason();
   const persona = BASE_PERSONA.replace("{today}", tools.todayLine());
   const mode = req.mode || "chat";
@@ -183,7 +225,7 @@ export async function buildSystem(req: ChatRequest, cache: Cache, withTools: boo
     }
     return `${persona}\n\n${MODE_PROMPTS[mode]}${extra}`;
   }
-  let sys = `${persona}\n\n${SCOPE_RULE}\n\n${CHAT_RULES}${await viewLine(req.team_id, season, cache)}${await todayBlock(req.team_id)}`;
+  let sys = `${persona}\n\n${SCOPE_RULE}\n\n${size === "small" ? SMALL_RULES : CHAT_RULES}${await viewLine(req.team_id, season, cache)}${await todayBlock(req.team_id)}`;
   if (!withTools) {
     const snapshot = [
       req.team_id ? await services.teamContext(req.team_id, season, cache).catch(() => "") : "",
@@ -239,7 +281,9 @@ function earlierData(digests: string[] | null | undefined, budget: number) {
 
 /** What this turn knew, for the next turns: its fact cards and the start of each tool result. */
 function digest(cards: string, toolTexts: string[]) {
-  const body = [cards.replace(/^DATA FOR THIS QUESTION[^\n]*\n/, ""), ...toolTexts.map((t) => t.slice(0, 600))].filter(Boolean).join("\n");
+  // the data, not this turn's instructions about it
+  const facts = cards.replace(/^(DATA FOR THIS QUESTION|SHOWN TO THE USER)[^\n]*\n/gm, "").replace(FACTS_ASK, "").trim();
+  const body = [facts, ...toolTexts.map((t) => t.slice(0, 600))].filter(Boolean).join("\n");
   return body.length > DIGEST_CHARS ? body.slice(0, DIGEST_CHARS).replace(/\n[^\n]*$/, "") : body;
 }
 
@@ -284,17 +328,31 @@ async function* factCheck(
       console.warn("fact-check revision failed:", e);
     }
     if (!started || !text.trim()) {
-      // No usable rewrite: keep the last answer, say what couldn't be confirmed.
-      if (started) yield sse("revision_restore", { text: current });
-      yield sse("factcheck", { checked, fixed, names: found, unresolved: true });
+      // No usable rewrite: keep the last answer without what couldn't be confirmed.
+      const trimmed = trimUnconfirmed(current, res);
+      if (trimmed.removed && trimmed.text) {
+        yield sse("revision_restore", { text: trimmed.text });
+        yield sse("factcheck", { checked, fixed: fixed + issueCount(res), names: found, removed: trimmed.removed });
+      } else {
+        if (started) yield sse("revision_restore", { text: current });
+        yield sse("factcheck", { checked, fixed, names: found, unresolved: true });
+      }
       return;
     }
     fixed += issueCount(res);
     current = text;
     res = checkAnswer(current, dataText, idx, opts);
   }
-  if (issueCount(res)) yield sse("factcheck", { checked, fixed, names: issues(res), unresolved: true });
-  else yield sse("factcheck", { checked, fixed, names: [...names] });
+  if (!issueCount(res)) {
+    yield sse("factcheck", { checked, fixed, names: [...names] });
+    return;
+  }
+  // Still wrong after the rewrites: take out what couldn't be confirmed rather than show it.
+  const { text, removed } = trimUnconfirmed(current, res);
+  if (removed && text) {
+    yield sse("revision_restore", { text });
+    yield sse("factcheck", { checked, fixed: fixed + issueCount(res), names: issues(res), removed });
+  } else yield sse("factcheck", { checked, fixed, names: issues(res), unresolved: true });
 }
 
 async function chain(req: ChatRequest): Promise<[string, string][]> {
@@ -384,24 +442,31 @@ export async function* chatEvents(req: ChatRequest, cache: Cache, signal?: Abort
   let cardText = "";
   /** Past seasons the question (or the one it follows up) is about. */
   let askedSeasons: string[] = [];
+  let question = "";
+  const ai = await settings.get("ai");
   if (mode === "chat") {
     const users = history.filter((m) => m.role === "user");
-    const question = req.messages?.filter((m) => m.role === "user").at(-1)?.content ?? users.at(-1)!.content;
+    question = req.messages?.filter((m) => m.role === "user").at(-1)?.content ?? users.at(-1)!.content;
     const previous = users.at(-2)?.content ?? "";
     askedSeasons = findSeasons(question).length ? findSeasons(question) : findSeasons(previous);
-    const local = !!providers.PROVIDERS[(await chain(req))[0][0]]?.local;
+    // a local or small model gets less data at once: the facts that matter, not everything
+    const [firstPid, firstModel] = (await chain(req))[0];
+    const local = !!providers.PROVIDERS[firstPid]?.local || providers.sizeOf(firstPid, firstModel, ai.model_size) === "small";
     const recheck = RECHECK.test(question);
     if (recheck) await cache.popWhere((k) => k.startsWith("roster_v5_") || k === "hub_injuries");
     yield sse("status", { text: "Looking up current data…" });
     try {
       idx = await playerIndex(cache);
       const timeout = new Promise<null>((r) => setTimeout(() => r(null), GROUND_TIMEOUT_MS));
-      const g = await Promise.race([
-        ground(question, { followed: req.team_id, cache, budget: local ? GROUND_BUDGET.local : GROUND_BUDGET.cloud, previous, index: idx }),
-        timeout,
+      const [g, tables] = await Promise.all([
+        Promise.race([ground(question, { followed: req.team_id, cache, budget: local ? GROUND_BUDGET.local : GROUND_BUDGET.cloud, previous, index: idx }), timeout]),
+        factsFor(question, { followed: req.team_id, cache, index: idx }).catch(() => [] as FactTable[]),
       ]);
       const earlier = recheck ? "" : earlierData(req.data_digests, local ? EARLIER_BUDGET.local : EARLIER_BUDGET.cloud);
-      cardText = g?.block ?? "";
+      // Verified tables go to the user as they are; the model gives its take on them.
+      if (tables.length) yield sse("facts", { tables });
+      const shown = tables.length ? `${FACTS_HEADER}\n${factsText(tables)}\n${FACTS_ASK}` : "";
+      cardText = [shown, g?.block ?? ""].filter(Boolean).join("\n\n");
       const block = [earlier && `DATA FROM EARLIER IN THIS CHAT (may be older than the data below):\n${earlier}`, cardText].filter(Boolean).join("\n\n");
       if (block) {
         const last = history.at(-1)!;
@@ -453,7 +518,6 @@ export async function* chatEvents(req: ChatRequest, cache: Cache, signal?: Abort
     };
   };
 
-  const ai = await settings.get("ai");
   const tried: string[] = [];
   for (let [pid, model] of await chain(req)) {
     const name = providers.PROVIDERS[pid]?.name ?? pid;
@@ -473,11 +537,13 @@ export async function* chatEvents(req: ChatRequest, cache: Cache, signal?: Abort
     for (const attemptTools of useTools ? [true, false] : [false]) {
       yield sse("meta", { provider: pid, provider_name: name, model, tools: attemptTools });
       try {
-        const system = await buildSystem(req, cache, attemptTools);
+        const size = providers.sizeOf(pid, model, ai.model_size);
+        const system = await buildSystem(req, cache, attemptTools, size);
         noteIds(system);
-        const specs = attemptTools ? tools.SPECS : null;
+        const specs = attemptTools ? toolsFor(size, question) : null;
+        const temperature = size === "small" ? SMALL_TEMPERATURE : undefined;
         let draft = "";
-        for await (const ev of adapter(pid)(pid, model, system, history, specs, toolRunner(pid), signal)) {
+        for await (const ev of adapter(pid)(pid, model, system, history, specs, toolRunner(pid), signal, undefined, temperature)) {
           if (ev.type === "token" || ev.type === "reasoning" || ev.type === "tool_call") emitted = true;
           if (ev.type === "token") draft += ev.text;
           yield sse(ev.type, ev);
@@ -500,7 +566,7 @@ export async function* chatEvents(req: ChatRequest, cache: Cache, signal?: Abort
             const timeout = new Promise<void>((r) => setTimeout(r, STINTS_TIMEOUT_MS));
             await Promise.race([Promise.all(tied.map(async (p) => stints.set(p.pid, await nbaHistory.fetchStints(p.pid, cache).catch(() => ({}))))), timeout]);
             const opts: CheckOptions = { teams: mode !== "brief", seasons: askedSeasons, stints };
-            yield* factCheck(draft, `${facts}\n${extra}`, index, (h) => adapter(pid)(pid, model, system, h, null, toolRunner(pid), signal), history, opts, extra);
+            yield* factCheck(draft, `${facts}\n${extra}`, index, (h) => adapter(pid)(pid, model, system, h, null, toolRunner(pid), signal, undefined, temperature), history, opts, extra);
           }
         }
         if (mode === "chat") yield sse("digest", { text: digest(cardText, toolTexts) });

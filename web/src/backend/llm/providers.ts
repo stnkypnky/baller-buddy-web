@@ -98,6 +98,21 @@ export const PROVIDERS: Record<string, Provider> = {
 const NON_CHAT = ["embed", "tts", "whisper", "dall-e", "image", "audio", "realtime", "moderation", "transcribe",
   "guard", "rerank", "davinci", "babbage", "imagen", "veo", "aqa", "learnlm", "-search-", "computer-use", "sora"];
 
+// Small models: under ~35B parameters by name, or a light tier ("mini", "flash-lite").
+const SMALL_NAME = /(mini|nano|haiku|flash-lite|lite|small|tiny|phi|gemma|smol)/i;
+const PARAMS = /(?:^|[^\d.])(\d{1,3}(?:\.\d)?)b(?:$|[^a-z])/i;
+
+/** "small" or "large": how much the chat leans on the app versus the model.
+ *  `setting` is Settings' choice; "auto" goes by the provider and model name. */
+export function sizeOf(pid: string, model: string, setting: string = "auto"): "small" | "large" {
+  if (setting === "small" || setting === "large") return setting;
+  const n = PARAMS.exec(model);
+  if (n) return Number(n[1]) < 35 ? "small" : "large";
+  if (SMALL_NAME.test(model)) return "small";
+  // a local server's model is unnamed or unknown: assume what fits a home machine
+  return PROVIDERS[pid]?.local ? "small" : "large";
+}
+
 export function get(pid: string): Provider {
   const p = PROVIDERS[pid];
   if (!p) throw new Error(`unknown provider '${pid}'`);

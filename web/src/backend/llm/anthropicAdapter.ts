@@ -38,7 +38,10 @@ export async function* stream(
   runTool: RunTool,
   signal?: AbortSignal,
   maxRounds = 6,
+  /** Unused: Claude models think adaptively, and thinking takes no temperature. */
+  temperature?: number,
 ): AsyncGenerator<AdapterEvent> {
+  void temperature;
   const client = new Anthropic({ apiKey: await getKey(pid), maxRetries: 2, timeout: 300_000, dangerouslyAllowBrowser: true });
   const messages: any[] = [...history];
   const aTools = (tools ?? []).map((s) => ({

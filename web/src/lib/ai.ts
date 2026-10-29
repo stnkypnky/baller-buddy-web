@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { create } from "zustand";
+import { persist } from "zustand/middleware";
 import { sse } from "./api";
+import { safeStorage } from "./store";
 
 export interface ToolChip {
   id: string;
@@ -36,9 +38,19 @@ export interface Turn {
   /** What the app looked up before the model answered ("Paul George", "Celtics"). */
   grounding?: string[];
   /** The fact-check: how many named players were checked, and which were fixed. */
-  factcheck?: { checked: number; fixed: number; names: string[]; unresolved?: boolean };
+  factcheck?: { checked: number; fixed: number; names: string[]; unresolved?: boolean; removed?: number };
   /** This turn's data, sent with later questions so follow-ups keep it. */
   digest?: string;
+  /** Verified tables the app built from the data, shown above the answer. */
+  facts?: FactTable[];
+}
+
+export interface FactTable {
+  title: string;
+  source: string;
+  columns: string[];
+  rows: string[][];
+  note?: string;
 }
 
 const CLOSE_TAGS = ["</think>", "</thought>", "</thinking>", "</reasoning>"];
@@ -99,6 +111,8 @@ export function applyEvent(t: Turn, event: string, data: any): Turn {
       return { ...t, status: [...(t.status ?? []), data.text], last: event };
     case "grounding":
       return { ...t, grounding: data.labels ?? [], last: event };
+    case "facts":
+      return { ...t, facts: data.tables ?? [], last: event };
     case "revision":
       // the fact-checked rewrite replaces the draft as it streams in
       return { ...t, content: "", status: [...(t.status ?? []), `Correcting ${(data.names ?? []).join(", ")}…`], last: event };
@@ -175,6 +189,60 @@ export function stopChat() {
   chatAbort?.abort();
 }
 
+/* ── Answers the user flagged as wrong (exported as eval cases) ──────────── */
+
+export interface AnswerReport {
+  at: string;
+  question: string;
+  answer: string;
+  model: string;
+  note: string;
+  facts?: FactTable[];
+  factcheck?: Turn["factcheck"];
+  /** The data the answer was built from. */
+  digest?: string;
+}
+
+const MAX_REPORTS = 50;
+
+export const useReports = create<{ reports: AnswerReport[]; add: (r: AnswerReport) => void; clear: () => void }>()(
+  persist(
+    (set) => ({
+      reports: [],
+      add: (r) => set((s) => ({ reports: [...s.reports, r].slice(-MAX_REPORTS) })),
+      clear: () => set({ reports: [] }),
+    }),
+    { name: "baller-buddy-reports", storage: safeStorage },
+  ),
+);
+
+/** Flag an assistant turn of the chat as wrong, with the question it answered. */
+export function reportTurn(turn: Turn, note: string) {
+  const turns = useChatStore.getState().turns;
+  const i = turns.findIndex((t) => t.id === turn.id);
+  const question = [...turns.slice(0, i)].reverse().find((t) => t.role === "user")?.content ?? "";
+  useReports.getState().add({
+    at: new Date().toISOString(),
+    question,
+    answer: turn.content,
+    model: turn.meta ? `${turn.meta.provider}:${turn.meta.model}` : "",
+    note: note.trim(),
+    facts: turn.facts,
+    factcheck: turn.factcheck,
+    digest: turn.digest,
+  });
+}
+
+/** Save the reports as a JSON file, to add to tests/evals. */
+export function exportReports() {
+  const blob = new Blob([JSON.stringify(useReports.getState().reports, null, 2)], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `ai-reports-${new Date().toISOString().slice(0, 10)}.json`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
 /* ── One-shot streams (matchup take, news brief, game recap) ─────────────── */
 
 export function useAiOneShot(resetKey?: string) {
@@ -241,6 +309,7 @@ export interface AiSettings {
   no_tools: string[];
   web_default: boolean;
   factcheck: boolean;
+  model_size?: "auto" | "small" | "large";
 }
 
 export interface ModelInfo {

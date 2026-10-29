@@ -139,13 +139,17 @@ export const SPECS: ToolSpec[] = [
   },
   {
     name: "get_season_games",
-    description: "A season's results, optionally for a team and/or opponent, by most recent, biggest margin or highest total.",
+    description:
+      "A season's results, optionally for a team and/or opponent and a date range, by most recent, biggest margin, highest total, " +
+      "or watch (the best games to watch: closest and overtime first).",
     parameters: { type: "object", properties: {
       team: TEAM,
       opponent: TEAM,
       season: SEASON,
       season_type: { type: "string", enum: ["regular", "playoffs"] },
-      sort: { type: "string", enum: ["recent", "margin", "total"] },
+      sort: { type: "string", enum: ["recent", "margin", "total", "watch"] },
+      from: { type: "string", description: "YYYY-MM-DD, first day (e.g. a month or week ago)." },
+      to: { type: "string", description: "YYYY-MM-DD, last day." },
       limit: { type: "integer", description: "Default 10, max 50." },
     } },
   },
@@ -312,15 +316,72 @@ function topLines(side: any) {
     .map((p: any) => ({ player: p.name, min: p.min, pts: p.pts, reb: p.reb, ast: p.ast, fg: `${p.fgm}-${p.fga}`, three: `${p.tpm}-${p.tpa}`, pm: p.pm }));
 }
 
-const scoreLine = (g: data.LiveGame) => ({
-  game_id: `espn_${g.id}`,
-  status: g.state === "post" ? "final" : g.state === "in" ? "live" : "scheduled",
-  detail: g.status_text,
-  tip_utc: g.date_utc,
-  ...(g.state !== "pre" ? { result: scoreTags(g) } : {}),
-  away: { team: g.away.app_name, abbr: g.away.abbr, score: g.away.score, record: g.away.record, leaders: leaderText(g.away) || undefined },
-  home: { team: g.home.app_name, abbr: g.home.abbr, score: g.home.score, record: g.home.record, leaders: leaderText(g.home) || undefined },
-});
+/** One game of a day as a line: "FINAL: NY 101 @ CHI 99 (close) · NY: Brunson 33 pts · game_id espn_…". */
+export function slateLine(g: data.LiveGame) {
+  const id = ` · game_id espn_${g.id}`;
+  if (g.state === "pre") return `${g.away.abbr} (${g.away.record}) @ ${g.home.abbr} (${g.home.record}) · ${g.status_text}${g.odds?.details ? ` · line ${g.odds.details}` : ""}${id}`;
+  const lead = [leaderText(g.away), leaderText(g.home)].filter(Boolean).join(" · ");
+  return `${g.state === "post" ? "FINAL" : `LIVE ${g.status_text}`}: ${scoreTags(g)}${lead ? ` · ${lead}` : ""}${id}`;
+}
+
+/** A day's games as text that says it's complete, best-to-watch included. */
+export function slateText(day: string, games: data.LiveGame[]) {
+  if (!games.length) return `GAMES ON ${day}: none — no NBA games that day.`;
+  const best = watchRank(games).filter((w) => w.why.length).slice(0, 3);
+  return (
+    `GAMES ON ${day} — every NBA game that day (${games.length}); there were no others, and a team not listed didn't play:\n` +
+    games.map((g) => `- ${slateLine(g)}`).join("\n") +
+    (best.length ? `\nBEST TO WATCH (the app's ranking): ${best.map((w) => `${w.game.away.abbr} @ ${w.game.home.abbr} (${w.why.join(", ")})`).join("; ")}` : "")
+  );
+}
+
+const winPct = (record: string) => {
+  const [w, l] = record.split("-").map(Number);
+  return w + l > 0 ? w / (w + l) : null;
+};
+
+/** Finished games, best to watch first, each with why: overtime, a close
+ *  finish, a big scoring night, an upset, a shootout. */
+export function watchRank(games: data.LiveGame[]) {
+  return games
+    .filter((g) => g.state === "post")
+    .map((g) => {
+      const a = Number(g.away.score) || 0;
+      const h = Number(g.home.score) || 0;
+      const margin = Math.abs(a - h);
+      const why: string[] = [];
+      let score = 0;
+      if (g.period > 4) {
+        score += 10 * (g.period - 4);
+        why.push(g.period > 5 ? `${g.period - 4} overtimes` : "overtime");
+      }
+      if (margin <= 3) {
+        score += 10;
+        why.push(`decided by ${margin}`);
+      } else if (margin <= 7) {
+        score += 4;
+        why.push(`a ${margin}-point game`);
+      } else if (margin >= 20) score -= 5;
+      const top = [...(g.away.leaders ?? []), ...(g.home.leaders ?? [])].filter((l) => l.category === "PTS").sort((x, y) => Number(y.value) - Number(x.value))[0];
+      if (top && Number(top.value) >= 35) {
+        score += Number(top.value) >= 45 ? 8 : 5;
+        why.push(`${top.player} scored ${top.value}`);
+      }
+      const [winner, loser] = h > a ? [g.home, g.away] : [g.away, g.home];
+      const pw = winPct(winner.record);
+      const pl = winPct(loser.record);
+      if (pw !== null && pl !== null && pl - pw >= 0.25) {
+        score += 4;
+        why.push(`upset: ${winner.abbr} beat a better team`);
+      }
+      if (a + h >= 245) {
+        score += 2;
+        why.push(`${a + h} total points`);
+      }
+      return { game: g, score, why };
+    })
+    .sort((x, y) => y.score - x.score);
+}
 
 function playerBio(b: Record<string, any>) {
   const age = b.birthdate ? Math.floor((Date.now() - Date.parse(b.birthdate)) / (365.25 * 86400_000)) : null;
@@ -494,11 +555,16 @@ const EXECUTORS: Record<string, Exec> = {
     if (args.team && !t) throw new ToolError(`Unknown team '${args.team}'`);
     if (args.opponent && !o) throw new ToolError(`Unknown team '${args.opponent}'`);
     const has = (g: any, x: Team) => g.home?.team_id === x.id || g.away?.team_id === x.id;
-    games = games.filter((g) => g.home && g.away && (!t || has(g, t)) && (!o || has(g, o)));
+    const from = String(args.from ?? "");
+    const to = String(args.to ?? "");
+    games = games.filter((g) => g.home && g.away && (!t || has(g, t)) && (!o || has(g, o)) && (!from || g.date >= from) && (!to || g.date <= to));
     const margin = (g: any) => Math.abs(g.home.pts - g.away.pts);
     const total = (g: any) => g.home.pts + g.away.pts;
+    // overtime and a close finish make a game worth watching; a blowout doesn't
+    const watch = (g: any) => (g.ot ? 12 : 0) + Math.max(0, 12 - margin(g)) + (total(g) >= 245 ? 2 : 0);
     if (args.sort === "margin") games = [...games].sort((a, b) => margin(b) - margin(a));
     else if (args.sort === "total") games = [...games].sort((a, b) => total(b) - total(a));
+    else if (args.sort === "watch") games = [...games].sort((a, b) => watch(b) - watch(a));
     const line = (g: any) => {
       const w = g.home.pts > g.away.pts ? g.home : g.away;
       return `${g.date} ${g.away.abbr} ${g.away.pts} @ ${g.home.abbr} ${g.home.pts} (${w.abbr} by ${margin(g)}${g.ot ? ", OT" : ""}${g.pending ? ", box score pending" : ""})`;
@@ -616,10 +682,7 @@ const EXECUTORS: Record<string, Exec> = {
   async get_scoreboard(args) {
     const date = String(args.date ?? "").replaceAll("-", "");
     const sb = await data.fetchScoreboard(date || null);
-    const note = sb.games.length
-      ? `These ${sb.games.length} games are every NBA game on this date. Report only these, with these scores and these players; there were no others.`
-      : "No NBA games on this date.";
-    return [{ date: sb.date, game_count: sb.games.length, note, games: sb.games.map(scoreLine) }, `Pulled scoreboard${args.date ? " for " + args.date : ""}`];
+    return [slateText(sb.date.slice(0, 10) || String(args.date ?? "today"), sb.games), `Pulled scoreboard${args.date ? " for " + args.date : ""}`];
   },
 
   async get_upcoming_games(args, cache) {

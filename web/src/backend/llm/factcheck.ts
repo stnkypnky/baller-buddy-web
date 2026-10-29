@@ -25,6 +25,8 @@ export interface Problem {
   reason: string;
   /** His teams by season, for the correction sheet ("2024-25 SAC · 2025-26 BOS"). */
   teams?: string;
+  /** The sentence or table row it's in (none: wherever he's named). */
+  where?: string;
 }
 
 /** {season: team tricodes} for one player (history.fetchStints). */
@@ -37,6 +39,8 @@ export interface Claim {
   text: string;
   /** What the data does say, for the correction sheet ("" when nothing relevant). */
   hint: string;
+  /** The sentence or table row it's in. */
+  where?: string;
 }
 
 export interface CheckResult {
@@ -147,8 +151,8 @@ const at = (sentence: string, p: IndexedPlayer) => fold(sentence).indexOf(lastNa
 
 function checkTies(answer: string, named: IndexedPlayer[], opts: CheckOptions): Problem[] {
   const problems: Problem[] = [];
-  const flag = (p: IndexedPlayer, reason: string) => problems.push({ player: p, reason, teams: teamsBySeason(p, opts) || undefined });
   for (const s of sentences(answer)) {
+    const flag = (p: IndexedPlayer, reason: string) => problems.push({ player: p, reason, teams: teamsBySeason(p, opts) || undefined, where: s });
     const here = named.filter((p) => at(s, p) >= 0);
     if (!here.length) continue;
     const when = whenOf(s, opts);
@@ -198,6 +202,26 @@ function checkPlayers(answer: string, data: string, named: IndexedPlayer[], opts
   if (opts.teams !== false) problems.push(...checkTies(answer, present, opts));
   const seen = new Set<number>();
   return problems.filter((x) => !seen.has(x.player.pid) && seen.add(x.player.pid));
+}
+
+// "Tatum is out tonight", "Brown (questionable)": called hurt or held out.
+const HURT = /\b(ruled out|(?:is|was|will be|remains) out|out (?:tonight|for|with|indefinitely)|injured|sidelined|questionable|doubtful|day-to-day|on the injury report|(?:will|to) miss)\b/i;
+const NOT_HURT = /\b(not|isn'?t|aren'?t|no longer|off the injury report|returns?|returned|back from|cleared|healthy)\b/i;
+const INJURY_WORDS = /\b(out|injur\w*|questionable|doubtful|day-to-day|probable|sprain\w*|strain\w*|surgery|knee|ankle|hamstring|achilles|back|foot|hip|calf|illness|rest|suspen\w*)\b/i;
+
+/** Players the answer calls hurt or out whom no injury report in the data lists. */
+function checkInjuries(answer: string, dataText: string, named: IndexedPlayer[]): Problem[] {
+  const out: Problem[] = [];
+  for (const s of sentences(answer)) {
+    const m = HURT.exec(fold(s));
+    if (!m || NOT_HURT.test(s) || SPECULATIVE.test(s)) continue;
+    // the one called hurt: named nearest before the words ("Tatum is out, so Brown…")
+    const here = named.filter((x) => at(s, x) >= 0);
+    const p = here.filter((x) => at(s, x) < m.index).sort((a, b) => at(s, b) - at(s, a))[0] ?? here.sort((a, b) => at(s, a) - at(s, b))[0];
+    if (!p || playerWindows(dataText, p).some((w) => INJURY_WORDS.test(w))) continue;
+    out.push({ player: p, reason: "called injured or out, but no injury report in the data lists him", where: s });
+  }
+  return out;
 }
 
 /** Players whose team ties need their past seasons checked: named in a
@@ -360,22 +384,22 @@ function checkGames(answer: string, dataText: string, named: IndexedPlayer[], op
     if (!scores.length && !stats.some(([, p]) => p)) continue; // a matchup mentioned, not a result
     const games = known.filter((g) => ts.every((t) => g.teams.includes(t))).map((g) => g.text);
     if (!games.length) {
-      claims.push({ kind: "game", text: `${ts[0].nickname}–${ts[1].nickname} game`, hint: slate(dataText) || "no game between these teams" });
+      claims.push({ kind: "game", text: `${ts[0].nickname}–${ts[1].nickname} game`, hint: slate(dataText) || "no game between these teams", where: row });
       continue;
     }
     const these = games.join("\n");
     const hint = games[0].slice(0, 400);
     const pairs = pairsIn(these);
-    for (const m of scores) if (!pairs.has([+m[1], +m[2]].sort((x, y) => y - x).join("-"))) claims.push({ kind: "score", text: m[0], hint });
+    for (const m of scores) if (!pairs.has([+m[1], +m[2]].sort((x, y) => y - x).join("-"))) claims.push({ kind: "score", text: m[0], hint, where: row });
     for (const [m, p] of stats) {
       if (!p) continue;
       const { known: k, teams: his } = teamsOf(p, whenOf(row, opts), opts);
       if (k && !ts.some((t) => his.has(t.abbreviation))) {
-        problems.push({ player: p, reason: `named in the ${ts[0].nickname}–${ts[1].nickname} game, but he plays for neither team`, teams: teamsBySeason(p, opts) || undefined });
+        problems.push({ player: p, reason: `named in the ${ts[0].nickname}–${ts[1].nickname} game, but he plays for neither team`, teams: teamsBySeason(p, opts) || undefined, where: row });
         continue;
       }
       const windows = playerWindows(these, p);
-      if (!windows.length || !matches(m[1], numbersIn(windows.join(" ")))) claims.push({ kind: "stat", text: `${p.name}: ${m[0]}`, hint });
+      if (!windows.length || !matches(m[1], numbersIn(windows.join(" ")))) claims.push({ kind: "stat", text: `${p.name}: ${m[0]}`, hint, where: row });
     }
   }
   return { problems, claims };
@@ -405,7 +429,7 @@ function checkNumbers(answer: string, dataText: string, named: IndexedPlayer[], 
       const hint = teams.length
         ? dataLines.filter((l) => teams.some((t) => l.includes(t.abbreviation) || l.includes(t.nickname))).slice(0, 3).join(" | ").slice(0, 400)
         : "";
-      claims.push({ kind: score ? "score" : "pair", text: m[0], hint });
+      claims.push({ kind: score ? "score" : "pair", text: m[0], hint, where: s });
     }
 
     // player stats: "31 points", "8.4 rebounds", checked against that player's own numbers
@@ -415,9 +439,9 @@ function checkNumbers(answer: string, dataText: string, named: IndexedPlayer[], 
         const windows = playerWindows(dataText, p);
         if (!windows.length) continue; // reported as a player problem already
         if (matches(m[1], numbersIn(windows.join(" ")))) continue;
-        claims.push({ kind: "stat", text: `${p.name}: ${m[0]}`, hint: windows.slice(0, 3).join(" | ").slice(0, 400) });
+        claims.push({ kind: "stat", text: `${p.name}: ${m[0]}`, hint: windows.slice(0, 3).join(" | ").slice(0, 400), where: s });
       } else if (!matches(m[1], known)) {
-        claims.push({ kind: "stat", text: m[0], hint: "" });
+        claims.push({ kind: "stat", text: m[0], hint: "", where: s });
       }
     }
 
@@ -428,7 +452,7 @@ function checkNumbers(answer: string, dataText: string, named: IndexedPlayer[], 
       if (new RegExp(`^\\s*(?:${STAT_UNITS})\\b`, "i").test(after)) continue; // a stat, checked above
       numbers++;
       if (matches(raw, known)) continue;
-      claims.push({ kind: "number", text: m[0], hint: "" });
+      claims.push({ kind: "number", text: m[0], hint: "", where: s });
     }
   }
   void idx;
@@ -447,10 +471,44 @@ export function checkAnswer(answer: string, dataText: string, idx: PlayerIndex, 
   // game claims first: their hints are that game's data, not the player's season
   const games = checkGames(answer, dataText, ok, opts);
   for (const p of games.problems) if (!flagged.has(p.player.pid)) flagged.add(p.player.pid) && problems.push(p);
+  // a brief's headlines can be newer than the injury report
+  if (opts.teams !== false) for (const p of checkInjuries(answer, dataText, ok)) if (!flagged.has(p.player.pid)) flagged.add(p.player.pid) && problems.push(p);
   const nums = checkNumbers(answer, dataText, ok.filter((p) => !flagged.has(p.pid)), idx);
   const seen = new Set<string>();
   const claims = [...games.claims, ...nums.claims].filter((c) => !seen.has(c.text) && seen.add(c.text)).slice(0, MAX_CLAIMS);
   return { named, problems, claims, numbers: nums.numbers };
+}
+
+/** The answer without the sentences and table rows the check couldn't
+ *  confirm (a player not in the data: every sentence naming him). Headings,
+ *  table headers and the rest stay; `removed` counts what went. */
+export function trimUnconfirmed(answer: string, res: CheckResult): { text: string; removed: number } {
+  const wheres = [...res.problems, ...res.claims].map((x) => x.where?.trim()).filter((w): w is string => !!w);
+  const nobodies = res.problems.filter((p) => !p.where).map((p) => p.player);
+  const bad = (unit: string) => wheres.some((w) => unit.includes(w)) || nobodies.some((p) => at(unit, p) >= 0);
+  let removed = 0;
+  const lines = answer.split("\n").flatMap((line) => {
+    if (line.includes("|")) {
+      if (!bad(line.trim())) return [line];
+      removed++;
+      return [];
+    }
+    const ss = sentences(line);
+    const kept = ss.filter((s) => !bad(s));
+    if (kept.length === ss.length) return [line];
+    removed += ss.length - kept.length;
+    if (!kept.length) return [];
+    // a bullet keeps its marker
+    const lead = /^\s*(?:[-*+]|\d+\.)\s+/.exec(line)?.[0] ?? "";
+    return [lead + kept.map((s) => s.replace(/^(?:[-*+]|\d+\.)\s+/, "")).join(" ")];
+  });
+  // a table left with only its header goes too
+  const text = lines
+    .join("\n")
+    .replace(/(^|\n)(\|[^\n]*\|\n\|[\s:|-]+\|)(?=\n(?!\|)|$)/g, "$1")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  return { text, removed };
 }
 
 /** How many things the fix covers (players plus numbers). */
