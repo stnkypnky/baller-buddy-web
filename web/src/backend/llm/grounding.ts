@@ -18,7 +18,8 @@ import { leaderText, scoreTags } from "./tools";
 
 /** Lowercase, no accents, no periods/apostrophes: "Dončić" -> "doncic", "Jr." -> "jr". */
 export const fold = (s: string) =>
-  s.normalize("NFKD").replace(/[̀-ͯ]/g, "").replace(/[.'’]/g, "").toLowerCase();
+  // possessives drop their 's ("Brunson's" is Brunson)
+  s.normalize("NFKD").replace(/[̀-ͯ]/g, "").replace(/(\w)['’]s\b/g, "$1").replace(/[.'’]/g, "").toLowerCase();
 
 const SUFFIX = /^(jr|sr|ii|iii|iv|v)$/;
 export const lastName = (name: string) => fold(name).split(/[\s-]+/).filter((w) => !SUFFIX.test(w)).at(-1) ?? fold(name);
@@ -177,9 +178,10 @@ export function findDates(text: string, today = data.nbaToday()): string[] {
   const f = fold(text);
   const out: string[] = [];
   const add = (d: string) => !out.includes(d) && out.push(d);
-  if (/\b(today|tonight|tonights)\b/.test(f)) add(today);
-  if (/\b(yesterday|yesterdays|last night)\b/.test(f)) add(shiftDay(today, -1));
-  if (/\b(tomorrow|tomorrows)\b/.test(f)) add(shiftDay(today, 1));
+  // typos too ("yesterdat", "tonite", "tmrw")
+  if (/\b(today|tdy|tonight|tonights|tonite|toniight)\b/.test(f)) add(today);
+  if (/\b(yest[a-z]*|ystrdy|last (?:night|nite))\b/.test(f)) add(shiftDay(today, -1));
+  if (/\b(tom+or+ow[a-z]*|tmrw|tmr|tomm?or+ow)\b/.test(f)) add(shiftDay(today, 1));
   WEEKDAYS.forEach((w, i) => {
     const m = new RegExp(`\\b(next |this )?${w}s?\\b`).exec(f);
     if (!m) return;
@@ -361,7 +363,8 @@ async function dateCard(day: string): Promise<Card> {
     const lead = [leaderText(g.away), leaderText(g.home)].filter(Boolean).join(" · ");
     return `${g.state === "post" ? "FINAL" : `LIVE ${g.status_text}`}: ${scoreTags(g)}${lead ? ` · ${lead}` : ""}`;
   };
-  return { label, text: `GAMES ON ${iso}:\n${sb.games.map((g) => `- ${line(g)}`).join("\n")}` };
+  const all = `every NBA game that day (${sb.games.length}); there were no others, and a team not listed didn't play`;
+  return { label, text: `GAMES ON ${iso} — ${all}:\n${sb.games.map((g) => `- ${line(g)}`).join("\n")}` };
 }
 
 // ── putting it together ──────────────────────────────────────────────────────

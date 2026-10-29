@@ -54,6 +54,8 @@ describe("finding what a question is about", () => {
     const today = "20261028"; // a Wednesday
     expect(findDates("what games should i watch from yesterday", today)).toEqual(["20261027"]);
     expect(findDates("how was the game last night", today)).toEqual(["20261027"]);
+    expect(findDates("How did the games turn out yesterdat", today)).toEqual(["20261027"]);
+    expect(findDates("who plays tonite", today)).toEqual([today]);
     expect(findDates("Monday's games", today)).toEqual(["20261026"]);
     expect(findDates("games on 10/26", today)).toEqual(["20261026"]);
     expect(findDates("Oct 26th", today)).toEqual(["20261026"]);
@@ -259,6 +261,15 @@ describe("a chat turn", () => {
     expect(events.find((e) => e.event === "digest").data.text).toContain("Paul George — plays for Boston Celtics");
   });
 
+  it("checks the rewrite too, and flags what a second rewrite still gets wrong", async () => {
+    const bad = "Marcus Smart, the Celtics' point guard, makes George's life easy.";
+    replies = [bad, bad, bad];
+    const events = await turn({ messages: [{ role: "user", content: "thoughts on Paul George as a Celtic" }] });
+    expect(sent).toHaveLength(3);
+    expect(events.filter((e) => e.event === "revision")).toHaveLength(2);
+    expect(events.find((e) => e.event === "factcheck").data).toMatchObject({ unresolved: true, names: ["Marcus Smart"] });
+  });
+
   it("makes no second call when the answer checks out", async () => {
     replies = ["George and Tatum make a strong pair."];
     const events = await turn({ messages: [{ role: "user", content: "thoughts on Paul George as a Celtic" }] });
@@ -337,6 +348,33 @@ describe("fact-check: scores and stats", () => {
       ["number", "+9.2"],
     ]);
     expect(check("In 2026-27, on 10/27 at 7:30, they tipped off.").claims).toEqual([]);
+  });
+
+  it("flags a game that isn't in the data, even in a table", () => {
+    // the Celtics didn't play that day; the data's only final is BKN @ DEN
+    const r = check("| Game | Final | Key performers |\n|---|---|---|\n| Boston Celtics @ Atlanta Hawks | 125-124 | Jayson Tatum 28 pts, Paul George 22 pts |");
+    expect(r.claims[0]).toMatchObject({ kind: "game", text: "Celtics–Hawks game" });
+    expect(r.claims[0].hint).toContain("BKN 110 @ DEN 112");
+    expect(correctionSheet(r.problems, r.claims)).toContain("The Celtics–Hawks game isn't in the data");
+  });
+
+  it("checks a game's score and players against that game", () => {
+    expect(check("| Nets @ Nuggets | 110-112 | Porter Jr. 31 pts |").claims).toEqual([]);
+    expect(check("| Nets @ Nuggets | 108-112 | Porter Jr. 31 pts |").claims.map((c) => c.text)).toEqual(["108-112"]);
+    // 18 is George's average, but nothing shows him in this game (and he's on neither team)
+    const r = check("| Nets @ Nuggets | 110-112 | Paul George 18 pts |");
+    expect(r.problems.map((p) => [p.player.name, p.reason])).toEqual([["Paul George", "named in the Nets–Nuggets game, but he plays for neither team"]]);
+  });
+
+  it("reads games from a scoreboard tool result", () => {
+    const sb =
+      '[get_scoreboard] {"date":"2026-10-28","game_count":2,"games":[{"game_id":"espn_1","status":"final","result":"NY 101 @ CHI 99","away":{"team":"New York Knicks","abbr":"NY","score":"101","leaders":"NY: Jalen Brunson 33 pts"},' +
+      '"home":{"team":"Chicago Bulls","abbr":"CHI","score":"99"}},{"game_id":"espn_2","status":"final","result":"LAC 120 @ PHX 110","away":{"team":"LA Clippers","abbr":"LAC","score":"120"},"home":{"team":"Phoenix Suns","abbr":"PHX","score":"110"}}]}';
+    expect(checkAnswer("The Knicks beat the Bulls 101-99 behind Jalen Brunson's 33 points.", sb, idx).claims).toEqual([]);
+    expect(checkAnswer("The Knicks beat the Bulls 133-127 behind Jalen Brunson's 38 points.", sb, idx).claims.map((c) => c.text)).toEqual([
+      "133-127",
+      "Jalen Brunson: 38 points",
+    ]);
   });
 
   it("lists number problems on the correction sheet", () => {

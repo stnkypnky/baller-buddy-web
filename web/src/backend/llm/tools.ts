@@ -16,7 +16,7 @@ import { zoneSummary } from "./shotzones";
 export const MAX_RESULT_CHARS = 9000;
 /** Compact text tools that cover a whole slate or league: they get room for
  *  all of it even when results are kept short (local models). */
-const WHOLE_LEAGUE = new Set(["get_game_previews", "get_standings", "get_season_games", "get_player_career", "compare_players"]);
+const WHOLE_LEAGUE = new Set(["get_scoreboard", "get_game_previews","get_standings", "get_season_games", "get_player_career", "compare_players"]);
 const WHOLE_LEAGUE_CHARS = 7000;
 
 const SEASON = { type: "string", description: "e.g. '2025-26'; omit for current." };
@@ -616,7 +616,10 @@ const EXECUTORS: Record<string, Exec> = {
   async get_scoreboard(args) {
     const date = String(args.date ?? "").replaceAll("-", "");
     const sb = await data.fetchScoreboard(date || null);
-    return [{ date: sb.date, games: sb.games.map(scoreLine) }, `Pulled scoreboard${args.date ? " for " + args.date : ""}`];
+    const note = sb.games.length
+      ? `These ${sb.games.length} games are every NBA game on this date. Report only these, with these scores and these players; there were no others.`
+      : "No NBA games on this date.";
+    return [{ date: sb.date, game_count: sb.games.length, note, games: sb.games.map(scoreLine) }, `Pulled scoreboard${args.date ? " for " + args.date : ""}`];
   },
 
   async get_upcoming_games(args, cache) {

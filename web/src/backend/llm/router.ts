@@ -33,6 +33,8 @@ const DIGEST_CHARS = 2500;
 const GROUND_TIMEOUT_MS = 20_000;
 /** Fetching players' past teams for the fact-check. */
 const STINTS_TIMEOUT_MS = 10_000;
+/** Rewrites the fact-check asks for before it gives up and flags what's left. */
+const MAX_REVISIONS = 2;
 /** The user doubts an answer: fetch fresh and don't lean on earlier data. */
 const RECHECK = /\b(re-?check|double[- ]check|are you sure|that'?s (wrong|not right|incorrect)|not (on|with) the|isn'?t on|no longer|wrong team)\b/i;
 
@@ -62,7 +64,8 @@ const CHAT_RULES =
   "Which tool to use:\n" +
   "- tonight's / a date's games, matchups, previews, predictions, who's favored → get_game_previews (one call covers every game)\n" +
   "- how a game went or is going → get_game_details with team=…\n" +
-  "- a day's scores → get_scoreboard; a season's results, blowouts, head-to-head → get_season_games\n" +
+  "- a day's scores → get_scoreboard; a season's results, blowouts, head-to-head → get_season_games. " +
+  "Report a day's games exactly as the data lists them: never add a game, change a score, or name a player the data doesn't show in that game\n" +
   "- a player's stats, bio, recent games → get_player; best players at a stat → get_player_leaders (rookies=true for rookies)\n" +
   "- team record, form, averages → get_team_report; roster and minutes → get_roster; game log → get_team_games\n" +
   "- where teams rank (offense, defense, pace…) → get_league_leaders (team=… for one team's rank); standings → get_standings\n" +
@@ -252,37 +255,46 @@ async function* factCheck(
   extra = "",
 ): AsyncGenerator<SseEvent> {
   yield sse("status", { text: "Checking facts…" });
-  const res = checkAnswer(draft, dataText, idx, opts);
+  let res = checkAnswer(draft, dataText, idx, opts);
   const checked = res.named.length + res.numbers;
-  const names = [...res.problems.map((p) => p.player.name), ...res.claims.map((c) => c.text)];
-  if (!issueCount(res)) {
-    yield sse("factcheck", { checked, fixed: 0, names: [] });
-    return;
-  }
-  const sheet = correctionSheet(res.problems, res.claims) + (extra ? `\n\nDATA for players your answer named:\n${extra}` : "");
-  const revised: ChatMessage[] = [...history, { role: "assistant", content: draft }, { role: "user", content: sheet }];
-  let started = false;
-  let text = "";
-  try {
-    for await (const ev of run(revised)) {
-      if (ev.type !== "token" || !ev.text) continue;
-      if (!started) {
-        started = true;
-        yield sse("revision", { names });
+  const issues = (r: typeof res) => [...r.problems.map((p) => p.player.name), ...r.claims.map((c) => c.text)];
+  const names = new Set<string>();
+  let fixed = 0;
+  let current = draft;
+  let convo = history;
+  // Each rewrite is checked again: a model can repeat the mistake it was told about.
+  for (let round = 0; round < MAX_REVISIONS && issueCount(res); round++) {
+    const found = issues(res);
+    for (const n of found) names.add(n);
+    const sheet = correctionSheet(res.problems, res.claims) + (extra ? `\n\nDATA for players your answer named:\n${extra}` : "");
+    convo = [...convo, { role: "assistant", content: current }, { role: "user", content: sheet }];
+    let started = false;
+    let text = "";
+    try {
+      for await (const ev of run(convo)) {
+        if (ev.type !== "token" || !ev.text) continue;
+        if (!started) {
+          started = true;
+          yield sse("revision", { names: found });
+        }
+        text += ev.text;
+        yield sse("token", ev);
       }
-      text += ev.text;
-      yield sse("token", ev);
+    } catch (e) {
+      console.warn("fact-check revision failed:", e);
     }
-  } catch (e) {
-    console.warn("fact-check revision failed:", e);
+    if (!started || !text.trim()) {
+      // No usable rewrite: keep the last answer, say what couldn't be confirmed.
+      if (started) yield sse("revision_restore", { text: current });
+      yield sse("factcheck", { checked, fixed, names: found, unresolved: true });
+      return;
+    }
+    fixed += issueCount(res);
+    current = text;
+    res = checkAnswer(current, dataText, idx, opts);
   }
-  if (!started || !text.trim()) {
-    // No usable rewrite: keep the draft, say what couldn't be confirmed.
-    if (started) yield sse("revision_restore", { text: draft });
-    yield sse("factcheck", { checked, fixed: 0, names, unresolved: true });
-    return;
-  }
-  yield sse("factcheck", { checked, fixed: issueCount(res), names });
+  if (issueCount(res)) yield sse("factcheck", { checked, fixed, names: issues(res), unresolved: true });
+  else yield sse("factcheck", { checked, fixed, names: [...names] });
 }
 
 async function chain(req: ChatRequest): Promise<[string, string][]> {

@@ -4,6 +4,9 @@
  *    - every player it names: in the data, not tied to a team he wasn't on in
  *      the season the sentence is about, and not called the teammate of
  *      someone he never shared a team with;
+ *    - every game (a row or sentence naming two teams with a score or a
+ *      player's line): in the data, with that score, and each player in it on
+ *      one of the two teams with the numbers that game's data shows;
  *    - every game score, record or run ("112-110", "11-3", "a 12-0 run");
  *    - every player stat ("31 points", "8 rebounds"), against that player's
  *      own numbers;
@@ -13,6 +16,7 @@
  *  slips and invented numbers wherever they turn up. */
 
 import { currentSeason } from "../config";
+import { TEAMS, type Team } from "../nba/teamData";
 import { getTeamName } from "../nba/teams";
 import { findSeasons, findTeams, fold, lastName, type IndexedPlayer, type PlayerIndex } from "./grounding";
 
@@ -28,7 +32,7 @@ export type Stints = Record<string, string[]>;
 
 /** A number in the answer the data doesn't back. */
 export interface Claim {
-  kind: "score" | "pair" | "stat" | "number";
+  kind: "game" | "score" | "pair" | "stat" | "number";
   /** The words as written ("beat Brooklyn 118-110", "31 points"). */
   text: string;
   /** What the data does say, for the correction sheet ("" when nothing relevant). */
@@ -283,6 +287,100 @@ const STAT_UNITS =
   "points?|pts|ppg|rebounds?|rebs?|rpg|boards|assists?|asts?|apg|dimes|steals?|stl|spg|blocks?|blk|bpg|threes|3s|3-pointers|triples|minutes|mins?|mpg|turnovers?|tov";
 const STAT = new RegExp(`(?<![\\d.\\-–])(\\d{1,3}(?:\\.\\d)?)\\s*(?:${STAT_UNITS})\\b`, "gi");
 
+/** A sentence with seasons, dates and times blanked out ("2026-27", "10/26", "7:30" aren't claims). */
+const plainOf = (s: string) => s.replace(/\b(19|20)\d\d(?:-\d\d)?\b/g, " ").replace(/\b\d{1,2}[/:]\d{1,2}\b/g, " ");
+
+/** Each stat in a sentence and whose it is: the player named nearest before
+ *  it, else the only one in the sentence. */
+function statsIn(s: string, plain: string, named: IndexedPlayer[]): [RegExpMatchArray, IndexedPlayer | undefined][] {
+  const who = named.filter((p) => fold(s).includes(lastName(p.name)));
+  return [...plain.matchAll(STAT)].map((m) => {
+    const at = m.index!;
+    const before = who
+      .map((p) => [p, s.toLowerCase().lastIndexOf(lastName(p.name).split(" ")[0], at)] as const)
+      .filter(([, i]) => i >= 0 && i < at)
+      .sort((x, y) => y[1] - x[1]);
+    return [m, before[0]?.[0] ?? (who.length === 1 ? who[0] : undefined)];
+  });
+}
+
+// ── games ────────────────────────────────────────────────────────────────────
+
+/** Words that make a stretch of the data about a game between the teams it names. */
+const GAME_WORDS = /@|\bvs\.?(?=\s)|\bFINAL\b|"(?:home|away|matchup|result)"/i;
+/** Scores in a sentence: two numbers in a basketball score's range. */
+const SCORE = /(?<![\d.])(\d{2,3})\s*(?:-|–|—|to)\s*(\d{2,3})(?!\d|\.\d|%)/g;
+const AVERAGE = /\b(averag\w*|per game|a night|this season|on the season|ppg|rpg|apg|mpg)\b/i;
+const isScore = (a: number, b: number) => a >= 70 && b >= 70 && a <= 200 && b <= 200;
+
+/** The teams a stretch of text names, ESPN's tricodes ("GS", "NY", "WSH") included. */
+function teamsIn(text: string): Team[] {
+  const out = findTeams(text);
+  for (const t of TEAMS) {
+    const espn = t.espn_abbr.toUpperCase();
+    if (!out.includes(t) && espn !== t.abbreviation && new RegExp(`\\b${espn}\\b`).test(text)) out.push(t);
+  }
+  return out;
+}
+
+/** The answer's rows: table rows and bullets whole, prose by sentence. */
+const rows = (text: string) => text.split(/\n+/).flatMap((l) => (l.includes("|") ? [l.trim()] : sentences(l)));
+
+/** Every game the data shows ("BOS 125 @ ATL 124", a scoreboard entry, a box score), with its teams. */
+function gamesIn(data: string): { text: string; teams: Team[] }[] {
+  return data
+    .split(/\n|\},\s*\{/)
+    .filter((c) => GAME_WORDS.test(c))
+    .map((text) => ({ text, teams: teamsIn(text) }))
+    .filter((g) => g.teams.length >= 2);
+}
+
+/** "BOS 125 @ ATL 124; NYK 101 @ CHI 99": the finished games the data has, for the sheet. */
+function slate(data: string): string {
+  const out = new Set<string>();
+  for (const m of data.matchAll(/FINAL: ([A-Z]{2,4} \d+ @ [A-Z]{2,4} \d+)|"result":"([^"]+)"/g)) out.add(m[1] ?? m[2]);
+  return out.size ? `the games in the data are ${[...out].slice(0, 15).join("; ")}` : "";
+}
+
+/** Games the answer describes (two teams, plus a score or a player's line):
+ *  the game has to be in the data, with that score, and each player in it on
+ *  one of the two teams with numbers that game's data shows. */
+function checkGames(answer: string, dataText: string, named: IndexedPlayer[], opts: CheckOptions): { problems: Problem[]; claims: Claim[] } {
+  const problems: Problem[] = [];
+  const claims: Claim[] = [];
+  const known = gamesIn(dataText);
+  for (const row of rows(answer)) {
+    if (SPECULATIVE.test(row)) continue;
+    const ts = findTeams(row);
+    if (ts.length !== 2) continue;
+    const plain = plainOf(row);
+    const scores = [...plain.matchAll(SCORE)].filter((m) => isScore(+m[1], +m[2]));
+    // "George is averaging 18 points" next to a result is his season, not that game
+    const stats = AVERAGE.test(row) ? [] : statsIn(row, plain, named);
+    if (!scores.length && !stats.some(([, p]) => p)) continue; // a matchup mentioned, not a result
+    const games = known.filter((g) => ts.every((t) => g.teams.includes(t))).map((g) => g.text);
+    if (!games.length) {
+      claims.push({ kind: "game", text: `${ts[0].nickname}–${ts[1].nickname} game`, hint: slate(dataText) || "no game between these teams" });
+      continue;
+    }
+    const these = games.join("\n");
+    const hint = games[0].slice(0, 400);
+    const pairs = pairsIn(these);
+    for (const m of scores) if (!pairs.has([+m[1], +m[2]].sort((x, y) => y - x).join("-"))) claims.push({ kind: "score", text: m[0], hint });
+    for (const [m, p] of stats) {
+      if (!p) continue;
+      const { known: k, teams: his } = teamsOf(p, whenOf(row, opts), opts);
+      if (k && !ts.some((t) => his.has(t.abbreviation))) {
+        problems.push({ player: p, reason: `named in the ${ts[0].nickname}–${ts[1].nickname} game, but he plays for neither team`, teams: teamsBySeason(p, opts) || undefined });
+        continue;
+      }
+      const windows = playerWindows(these, p);
+      if (!windows.length || !matches(m[1], numbersIn(windows.join(" ")))) claims.push({ kind: "stat", text: `${p.name}: ${m[0]}`, hint });
+    }
+  }
+  return { problems, claims };
+}
+
 function checkNumbers(answer: string, dataText: string, named: IndexedPlayer[], idx: PlayerIndex): { claims: Claim[]; numbers: number } {
   const known = numbersIn(dataText);
   const pairs = pairsIn(dataText);
@@ -293,8 +391,7 @@ function checkNumbers(answer: string, dataText: string, named: IndexedPlayer[], 
   for (const s of sentences(answer)) {
     // a hypothetical or a prediction isn't a claim of fact
     if (SPECULATIVE.test(s)) continue;
-    // a season ("2026-27"), a date ("10/26"), a time ("7:30") isn't a claim
-    const plain = s.replace(/\b(19|20)\d\d(?:-\d\d)?\b/g, " ").replace(/\b\d{1,2}[/:]\d{1,2}\b/g, " ");
+    const plain = plainOf(s);
 
     // scores, records and runs: "118-110", "11-3", "a 12-0 run"
     for (const m of plain.matchAll(/(?<![\d.])(\d{1,3})\s*(?:-|–|—)\s*(\d{1,3})(?!\d|\.\d|%)/g)) {
@@ -312,16 +409,8 @@ function checkNumbers(answer: string, dataText: string, named: IndexedPlayer[], 
     }
 
     // player stats: "31 points", "8.4 rebounds", checked against that player's own numbers
-    const who = named.filter((p) => fold(s).includes(lastName(p.name)));
-    for (const m of plain.matchAll(STAT)) {
+    for (const [m, p] of statsIn(s, plain, named)) {
       numbers++;
-      // the player named nearest before the stat, else the only one in the sentence
-      const at = m.index!;
-      const before = who
-        .map((p) => [p, s.toLowerCase().lastIndexOf(lastName(p.name).split(" ")[0], at)] as const)
-        .filter(([, i]) => i >= 0 && i < at)
-        .sort((x, y) => y[1] - x[1]);
-      const p = before[0]?.[0] ?? (who.length === 1 ? who[0] : undefined);
       if (p) {
         const windows = playerWindows(dataText, p);
         if (!windows.length) continue; // reported as a player problem already
@@ -354,8 +443,14 @@ export function checkAnswer(answer: string, dataText: string, idx: PlayerIndex, 
   const named = idx.find(answer, 12);
   const problems = checkPlayers(answer, fold(dataText), named, opts);
   const flagged = new Set(problems.map((p) => p.player.pid));
-  const { claims, numbers } = checkNumbers(answer, dataText, named.filter((p) => !flagged.has(p.pid)), idx);
-  return { named, problems, claims, numbers };
+  const ok = named.filter((p) => !flagged.has(p.pid));
+  // game claims first: their hints are that game's data, not the player's season
+  const games = checkGames(answer, dataText, ok, opts);
+  for (const p of games.problems) if (!flagged.has(p.player.pid)) flagged.add(p.player.pid) && problems.push(p);
+  const nums = checkNumbers(answer, dataText, ok.filter((p) => !flagged.has(p.pid)), idx);
+  const seen = new Set<string>();
+  const claims = [...games.claims, ...nums.claims].filter((c) => !seen.has(c.text) && seen.add(c.text)).slice(0, MAX_CLAIMS);
+  return { named, problems, claims, numbers: nums.numbers };
 }
 
 /** How many things the fix covers (players plus numbers). */
@@ -371,16 +466,17 @@ export function correctionSheet(problems: Problem[], claims: Claim[] = []): stri
       : `has no NBA games logged in ${season}${teams ? "" : "; don't say which team he's on"}`;
     return `- ${p.name} — ${fact}.${teams ? ` His teams by season: ${teams}.` : ""} (Your answer: ${reason}.)`;
   });
-  const label = { score: "score", pair: "record/run", stat: "stat", number: "number" } as const;
+  const label = { game: "game", score: "score", pair: "record/run", stat: "stat", number: "number" } as const;
   for (const c of claims) {
-    lines.push(`- "${c.text}" (${label[c.kind]}) isn't in the data.${c.hint ? ` The data says: ${c.hint}` : ""}`);
+    if (c.kind === "game") lines.push(`- The ${c.text} isn't in the data: nothing shows these teams played that game. Remove it. (${c.hint})`);
+    else lines.push(`- "${c.text}" (${label[c.kind]}) isn't in the data.${c.hint ? ` The data says: ${c.hint}` : ""}`);
   }
   return (
     "FACT CHECK — parts of your answer aren't supported by the current data:\n" +
     lines.join("\n") +
     "\nRewrite your full answer. Fix every team, teammate, role, game, score or stat claim listed using only this sheet and the DATA above " +
     "(two players were teammates only if they were on the same team in the same season); " +
-    "if the data doesn't show a number or what a player did, leave it out rather than guess. Keep everything that was right. " +
+    "if the data doesn't show a number or what a player did, leave it out rather than guess. Never add a game that isn't in the data. Keep everything that was right. " +
     "Output only the corrected answer, with no note about the correction."
   );
 }
