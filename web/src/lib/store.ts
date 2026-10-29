@@ -13,6 +13,8 @@ interface AppState {
   rosterView: "cards" | "table";
   /** Developer option: show the model's reasoning under AI answers. */
   showReasoning: boolean;
+  /** The music dock along the bottom of the window. */
+  showMusic: boolean;
   setTeam: (id: number) => void;
   setSeason: (s: string | null) => void;
   setSeasonType: (t: SeasonType) => void;
@@ -21,6 +23,7 @@ interface AppState {
   toggleSidebar: () => void;
   setRosterView: (v: "cards" | "table") => void;
   setShowReasoning: (v: boolean) => void;
+  setShowMusic: (v: boolean) => void;
 }
 
 // localStorage can throw (private mode, blocked storage) — degrade to memory.
@@ -59,6 +62,7 @@ export const useApp = create<AppState>()(
       sidebarCollapsed: false,
       rosterView: "cards",
       showReasoning: false,
+      showMusic: true,
       setTeam: (teamId) => set({ teamId }),
       setSeason: (season) => set({ season }),
       setSeasonType: (seasonType) => set({ seasonType }),
@@ -67,6 +71,7 @@ export const useApp = create<AppState>()(
       toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
       setRosterView: (rosterView) => set({ rosterView }),
       setShowReasoning: (showReasoning) => set({ showReasoning }),
+      setShowMusic: (showMusic) => set({ showMusic }),
     }),
     { name: "baller-buddy-ui", storage: safeStorage },
   ),

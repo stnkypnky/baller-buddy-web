@@ -20,7 +20,12 @@ const ALL_SIZES = {
   phone360: { width: 360, height: 780 }, // small Android
   phone390: { width: 390, height: 844 }, // iPhone
   phone412: { width: 412, height: 915 }, // large Android
+  land780: { width: 780, height: 360 }, // Galaxy S22 sideways
+  land915: { width: 915, height: 412 }, // large Android sideways
+  tablet: { width: 820, height: 1180 }, // iPad Air / Android tablet upright
 };
+// Sizes that are a touch device (phones either way up, tablets).
+const TOUCH = /^(phone|land|tablet)/;
 // Narrow a run: SIZES=phone412 ROUTES=/,/roster node scripts/shots.mjs out
 const ROUTES = process.env.ROUTES ? process.env.ROUTES.split(",") : ALL_ROUTES;
 const SIZES = Object.fromEntries(Object.entries(ALL_SIZES).filter(([k]) => !process.env.SIZES || process.env.SIZES.split(",").includes(k)));
@@ -130,7 +135,7 @@ async function check(page, label, name) {
 }
 
 for (const [label, viewport] of Object.entries(SIZES)) {
-  const phone = label.startsWith("phone");
+  const phone = TOUCH.test(label);
   // The page scrolls inside the app shell, so "full page" means a tall window.
   if (process.env.FULL) viewport.height = 2400;
   const ctx = await browser.newContext({ viewport, deviceScaleFactor: phone ? 2 : 1, isMobile: phone, hasTouch: phone });

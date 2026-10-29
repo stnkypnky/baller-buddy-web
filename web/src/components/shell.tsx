@@ -27,6 +27,7 @@ import { useMemo, useRef, useState, type ReactNode } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import { toast } from "sonner";
 import { post } from "../lib/api";
+import { useIsShort } from "../lib/phone";
 import { useSelection } from "../lib/queries";
 import { useApp } from "../lib/store";
 import type { Team } from "../lib/types";
@@ -40,7 +41,7 @@ import { cx, IconButton, TeamLogo, Tip } from "./ui";
 export function TitleBar({ center }: { center?: ReactNode }) {
   return (
     <div
-      className="drag relative z-30 flex h-10 shrink-0 items-center gap-3 border-b border-line/60 bg-black/30 pl-4 backdrop-blur-md"
+      className="drag relative z-30 flex h-10 shrink-0 items-center gap-3 border-b border-line/60 bg-black/30 pl-4 backdrop-blur-md short:hidden"
       style={{
         paddingLeft: "max(1rem, env(titlebar-area-x, 0px))",
         paddingRight: "calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw))",
@@ -102,7 +103,9 @@ const NAV: { group: string; items: NavItem[] }[] = [
 ];
 
 export function Sidebar() {
-  const collapsed = useApp((s) => s.sidebarCollapsed);
+  // A phone on its side keeps the slim rail: the page needs the width more than the labels.
+  const short = useIsShort();
+  const collapsed = useApp((s) => s.sidebarCollapsed) || short;
   const toggle = useApp((s) => s.toggleSidebar);
   const { pathname } = useLocation();
   const isActive = (it: NavItem) =>
@@ -134,7 +137,7 @@ export function Sidebar() {
         />
         <button
           onClick={toggle}
-          className="mt-1 flex h-9 w-full items-center gap-3 rounded-xl px-3 text-muted transition-colors hover:bg-surface-2 hover:text-fg"
+          className="mt-1 flex h-9 w-full items-center gap-3 rounded-xl px-3 text-muted transition-colors hover:bg-surface-2 hover:text-fg short:hidden"
         >
           {collapsed ? <ChevronsRight className="size-[18px] shrink-0" /> : <ChevronsLeft className="size-[18px] shrink-0" />}
           {!collapsed && <span className="text-[13px]">Collapse</span>}
@@ -209,7 +212,7 @@ export function TopBar({ title }: { title?: ReactNode }) {
   }
 
   return (
-    <div className="flex h-16 shrink-0 items-center gap-3 px-6 max-sm:gap-2 max-sm:px-3">
+    <div className="flex h-16 shrink-0 items-center gap-3 px-6 max-lg:px-4 max-sm:gap-2 max-sm:px-3 short:h-[52px]">
       <TeamSwitcher />
       <SeasonPicker />
       <div className="min-w-0 flex-1 truncate pl-2 text-sm text-muted max-sm:pl-0">{title}</div>
@@ -274,7 +277,7 @@ export function TeamSwitcher({
           whileTap={{ scale: 0.98 }}
           className={cx(
             "group flex items-center gap-3 rounded-2xl border border-line bg-surface pr-3 pl-1.5 transition-colors hover:border-team-text/30 hover:bg-surface-2",
-            compact ? "h-11" : "h-12",
+            compact ? "h-11" : "h-12 short:h-10",
           )}
         >
           <div className="grid size-9 place-items-center rounded-xl bg-black/30">
@@ -347,7 +350,7 @@ function SeasonPicker() {
   return (
     <Popover.Root open={open} onOpenChange={setOpen}>
       <Popover.Trigger asChild>
-        <button className="group flex h-12 items-center gap-2 rounded-2xl border border-line bg-surface px-4 transition-colors hover:border-team-text/30 hover:bg-surface-2 max-sm:px-3">
+        <button className="group flex h-12 items-center gap-2 rounded-2xl border border-line bg-surface px-4 transition-colors hover:border-team-text/30 hover:bg-surface-2 max-sm:px-3 short:h-10">
           <div className="text-left leading-tight">
             <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted">Season</div>
             <div className="display text-[17px] font-bold tracking-wide">{sel.season || "…"}</div>

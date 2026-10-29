@@ -1,8 +1,9 @@
 /** Fact-check: after an answer is written, its checkable claims are held up
  *  against the data it was built from (fact cards, tool results, a one-shot's
  *  game or stats data):
- *    - every player it names: in the data, and not tied to a team he doesn't
- *      play for;
+ *    - every player it names: in the data, not tied to a team he wasn't on in
+ *      the season the sentence is about, and not called the teammate of
+ *      someone he never shared a team with;
  *    - every game score, record or run ("112-110", "11-3", "a 12-0 run");
  *    - every player stat ("31 points", "8 rebounds"), against that player's
  *      own numbers;
@@ -13,12 +14,17 @@
 
 import { currentSeason } from "../config";
 import { getTeamName } from "../nba/teams";
-import { findTeams, fold, lastName, type IndexedPlayer, type PlayerIndex } from "./grounding";
+import { findSeasons, findTeams, fold, lastName, type IndexedPlayer, type PlayerIndex } from "./grounding";
 
 export interface Problem {
   player: IndexedPlayer;
   reason: string;
+  /** His teams by season, for the correction sheet ("2024-25 SAC · 2025-26 BOS"). */
+  teams?: string;
 }
+
+/** {season: team tricodes} for one player (history.fetchStints). */
+export type Stints = Record<string, string[]>;
 
 /** A number in the answer the data doesn't back. */
 export interface Claim {
@@ -40,6 +46,12 @@ export interface CheckResult {
 export interface CheckOptions {
   /** Skip "tied to the wrong team": a news brief can be newer than the stats. */
   teams?: boolean;
+  /** Past seasons the question was about ("last year"): a sentence that names
+   *  no season is taken to mean one of them, or this season. */
+  seasons?: string[];
+  /** Each named player's teams by season, so past ties can be checked
+   *  (without them only this season's team is known). */
+  stints?: Map<number, Stints>;
 }
 
 const MAX_CLAIMS = 8;
@@ -65,8 +77,8 @@ function affiliated(sentence: string, player: IndexedPlayer, teamWords: string[]
       // "the Celtics' Smart", "Celtics guard Smart", "Celtics star Smart"
       new RegExp(`${t}s?'?s? (?:\\w+ ){0,2}(?:${p})`),
       new RegExp(`${t} (?:guard|forward|center|star|rookie|big|wing|point guard|veteran|sixth man|starter) (?:${p})`),
-      // "Smart, the Celtics' point guard", "Smart of the Celtics", "Harden ... for the Nets"
-      new RegExp(`(?:${p})(?:,| is| was| has been| remains)? (?:\\w+ ){0,3}(?:the )?${t}'?s? (?:guard|forward|center|star|starter|point guard|leader|top)`),
+      // "Smart, the Celtics' (backup) point guard", "Smart of the Celtics", "Harden ... for the Nets"
+      new RegExp(`(?:${p})(?:,| is| was| has been| remains)? (?:\\w+ ){0,3}(?:the )?${t}'?s? (?:\\w+ )?(?:guard|forward|center|star|starter|point guard|leader|top|big|wing|sixth man)`),
       new RegExp(`(?:${p})[^.]{0,60}\\b(?:for|with|on|of|joined|joins|signed with|traded to|plays for|playing for) the ${t}\\b`),
       // "Smart (BOS)"
       new RegExp(`(?:${p}) \\(${t}\\)`),
@@ -74,26 +86,121 @@ function affiliated(sentence: string, player: IndexedPlayer, teamWords: string[]
   });
 }
 
-function checkPlayers(answer: string, data: string, named: IndexedPlayer[], opts: CheckOptions): Problem[] {
+// Old tricodes in nba.com's career tables -> the franchise's tricode today.
+const FRANCHISE: Record<string, string> = {
+  NJN: "BKN", NYN: "BKN", SEA: "OKC", VAN: "MEM", NOH: "NOP", NOK: "NOP", CHH: "CHA", WSB: "WAS", BAL: "WAS", CAP: "WAS",
+  SDC: "LAC", BUF: "LAC", KCK: "SAC", KCO: "SAC", CIN: "SAC", ROC: "SAC", NOJ: "UTA", SDR: "HOU", PHW: "GSW", SFW: "GSW",
+  SYR: "PHI", MNL: "LAL", FTW: "DET", MLH: "ATL", STL: "ATL", TRI: "ATL", GOS: "GSW", UTH: "UTA", PHL: "PHI", SAN: "SAS",
+};
+const franchise = (abbr: string) => FRANCHISE[abbr] ?? abbr;
+
+/** Seasons a sentence is about: the ones it names; else the question's plus
+ *  this one; else, told in the past tense ("was", "played"), any season of a
+ *  career; else this season. */
+type When = string[] | "any";
+const NOW = /\b(this (?:season|year)|currently|right now|these days|now)\b/i;
+const PAST = /\b(was|were|played|spent|came up|began|drafted|former|formerly|used to|previously|back in|then-|earlier in (?:his|their) career)\b/i;
+
+function whenOf(sentence: string, opts: CheckOptions): When {
+  const season = currentSeason();
+  const past = findSeasons(sentence);
+  const now = NOW.test(sentence) || sentence.includes(season);
+  if (past.length) return now ? [...past, season] : past;
+  if (now) return [season];
+  if (opts.seasons?.length) return [...opts.seasons, season];
+  return PAST.test(sentence) ? "any" : [season];
+}
+
+/** The teams a player was on in those seasons; `known` is false when there's
+ *  nothing to go on (no stints for a past season, no games this season). */
+function teamsOf(p: IndexedPlayer, when: When, opts: CheckOptions): { known: boolean; teams: Set<string> } {
+  const season = currentSeason();
+  const st: Stints = { ...(opts.stints?.get(p.pid) ?? {}) };
+  if (p.team_abbr) st[season] = [...new Set([...(st[season] ?? []), p.team_abbr])];
+  const hasPast = !!opts.stints?.get(p.pid) && Object.keys(opts.stints.get(p.pid)!).length > 0;
+  const seasons = when === "any" ? Object.keys(st) : when;
+  const known = when === "any" ? seasons.length > 0 : when.some((s) => (s === season ? !!p.team_abbr : hasPast));
+  return { known, teams: new Set(seasons.flatMap((s) => st[s] ?? []).map(franchise)) };
+}
+
+/** "2024-25 SAC · 2025-26 SAC · 2026-27 BOS": his last few seasons, for the sheet. */
+function teamsBySeason(p: IndexedPlayer, opts: CheckOptions): string {
+  const st: Stints = { ...(opts.stints?.get(p.pid) ?? {}) };
+  if (p.team_abbr) st[currentSeason()] = [...new Set([...(st[currentSeason()] ?? []), p.team_abbr])];
+  return Object.keys(st).sort().slice(-5).map((s) => `${s} ${st[s].join("/")}`).join(" · ");
+}
+
+const whenText = (w: When) => (w === "any" ? "at any point in his career" : `in ${w.join(" or ")}`);
+
+// "alongside Duren", "teamed with", "his backcourt partner": the players after it are called teammates
+const TEAMMATE =
+  /\b(alongside|teammates?|teamed (?:up )?with|played with|playing with|plays with|paired with|pairing with|next to|joined by|(?:backcourt|frontcourt) (?:mate|partner)s?|running mates?|sharing the (?:floor|court|ball|backcourt|frontcourt) with|with the likes of|surrounded by)\b/i;
+// Words that put a team on the other side of the sentence.
+const OPPOSED = /\b(against|vs\.?|versus|beat|beating|faced|facing|traded|trade|over)\b/i;
+
+/** Where in a sentence a player is named (his last name), or -1. */
+const at = (sentence: string, p: IndexedPlayer) => fold(sentence).indexOf(lastName(p.name));
+
+function checkTies(answer: string, named: IndexedPlayer[], opts: CheckOptions): Problem[] {
   const problems: Problem[] = [];
-  for (const p of named) {
-    const inData = data.includes(fold(p.name)) || (!!p.row && wordIn(data, lastName(p.name)) && lastName(p.name).length >= 5);
-    if (!inData) {
-      // a legend mentioned in passing isn't a claim; his numbers are still checked
-      if (!p.retired) problems.push({ player: p, reason: "not in the data this answer was built from" });
-      continue;
+  const flag = (p: IndexedPlayer, reason: string) => problems.push({ player: p, reason, teams: teamsBySeason(p, opts) || undefined });
+  for (const s of sentences(answer)) {
+    const here = named.filter((p) => at(s, p) >= 0);
+    if (!here.length) continue;
+    const when = whenOf(s, opts);
+    const teams = findTeams(s);
+    // "the Celtics' Smart", "Harden ... for the Nets"
+    for (const p of here) {
+      const { known, teams: his } = teamsOf(p, when, opts);
+      if (!known) continue;
+      for (const t of teams) {
+        if (his.has(t.abbreviation)) continue;
+        if (affiliated(s, p, [t.nickname, t.full_name, t.abbreviation])) flag(p, `tied to the ${t.full_name} ${whenText(when)}`);
+      }
     }
-    if (!p.team_abbr || opts.teams === false) continue;
-    for (const s of sentences(answer)) {
-      if (!fold(s).includes(lastName(p.name))) continue;
-      for (const t of findTeams(s)) {
-        if (t.abbreviation === p.team_abbr) continue;
-        if (affiliated(s, p, [t.nickname, t.full_name, t.abbreviation])) problems.push({ player: p, reason: `tied to the ${t.full_name}` });
+    // "Carter played alongside Jalen Duren (on the Kings)"
+    const m = TEAMMATE.exec(fold(s));
+    if (!m) continue;
+    const subject = here.filter((p) => at(s, p) < m.index).sort((a, b) => at(s, a) - at(s, b))[0];
+    const mates = here.filter((p) => at(s, p) > m.index);
+    const team = teams.length === 1 && !OPPOSED.test(s) ? teams[0] : undefined;
+    if (team) {
+      for (const p of [...(subject ? [subject] : []), ...mates]) {
+        const { known, teams: his } = teamsOf(p, when, opts);
+        if (known && !his.has(team.abbreviation)) flag(p, `called a ${team.nickname} teammate, but he wasn't on the ${team.full_name} ${whenText(when)}`);
+      }
+    } else if (subject) {
+      const seasons = when === "any" ? Object.keys({ ...opts.stints?.get(subject.pid), [currentSeason()]: [] }) : when;
+      for (const p of mates) {
+        const both = seasons.map((x) => [teamsOf(subject, [x], opts), teamsOf(p, [x], opts)] as const);
+        if (!both.some(([a, b]) => a.known && b.known)) continue;
+        if (both.some(([a, b]) => [...a.teams].some((t) => b.teams.has(t)))) continue;
+        flag(p, `called ${subject.name}'s teammate, but they weren't on the same team ${whenText(when)}`);
       }
     }
   }
+  return problems;
+}
+
+function checkPlayers(answer: string, data: string, named: IndexedPlayer[], opts: CheckOptions): Problem[] {
+  const problems: Problem[] = [];
+  const present: IndexedPlayer[] = [];
+  for (const p of named) {
+    const inData = data.includes(fold(p.name)) || (!!p.row && wordIn(data, lastName(p.name)) && lastName(p.name).length >= 5);
+    if (inData) present.push(p);
+    // a legend mentioned in passing isn't a claim; his numbers are still checked
+    else if (!p.retired) problems.push({ player: p, reason: "not in the data this answer was built from" });
+  }
+  if (opts.teams !== false) problems.push(...checkTies(answer, present, opts));
   const seen = new Set<number>();
   return problems.filter((x) => !seen.has(x.player.pid) && seen.add(x.player.pid));
+}
+
+/** Players whose team ties need their past seasons checked: named in a
+ *  sentence that also names a team or calls someone a teammate. */
+export function tiedPlayers(answer: string, named: IndexedPlayer[]): IndexedPlayer[] {
+  const ss = sentences(answer).filter((s) => findTeams(s).length || TEAMMATE.test(fold(s)));
+  return named.filter((p) => ss.some((s) => at(s, p) >= 0));
 }
 
 // ── numbers ──────────────────────────────────────────────────────────────────
@@ -258,11 +365,11 @@ export const issueCount = (r: CheckResult) => r.problems.length + r.claims.lengt
 export function correctionSheet(problems: Problem[], claims: Claim[] = []): string {
   const season = currentSeason();
   const n1 = (v: unknown) => (typeof v === "number" ? v.toFixed(1) : "?");
-  const lines = problems.map(({ player: p, reason }) => {
+  const lines = problems.map(({ player: p, reason, teams }) => {
     const fact = p.row
       ? `plays for the ${getTeamName(p.row.team_id) || p.row.team_abbr} (${p.row.team_abbr}) in ${season}: ${p.row.gp} GP, ${n1(p.row.PTS)} pts, ${n1(p.row.REB)} reb, ${n1(p.row.AST)} ast`
-      : `has no NBA games logged in ${season}; don't say which team he's on`;
-    return `- ${p.name} — ${fact}. (Your answer: ${reason}.)`;
+      : `has no NBA games logged in ${season}${teams ? "" : "; don't say which team he's on"}`;
+    return `- ${p.name} — ${fact}.${teams ? ` His teams by season: ${teams}.` : ""} (Your answer: ${reason}.)`;
   });
   const label = { score: "score", pair: "record/run", stat: "stat", number: "number" } as const;
   for (const c of claims) {
@@ -271,7 +378,8 @@ export function correctionSheet(problems: Problem[], claims: Claim[] = []): stri
   return (
     "FACT CHECK — parts of your answer aren't supported by the current data:\n" +
     lines.join("\n") +
-    "\nRewrite your full answer. Fix every team, role, game, score or stat claim listed using only this sheet and the DATA above; " +
+    "\nRewrite your full answer. Fix every team, teammate, role, game, score or stat claim listed using only this sheet and the DATA above " +
+    "(two players were teammates only if they were on the same team in the same season); " +
     "if the data doesn't show a number or what a player did, leave it out rather than guess. Keep everything that was right. " +
     "Output only the corrected answer, with no note about the correction."
   );

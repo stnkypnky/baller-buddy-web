@@ -70,7 +70,9 @@ export default function MusicDock() {
     <div className="relative z-40 shrink-0">
       <AnimatePresence>{p.expanded && <Playlist />}</AnimatePresence>
 
-      <div className="relative grid h-[72px] grid-cols-[minmax(240px,1fr)_minmax(380px,560px)_minmax(240px,1fr)] items-center gap-6 border-t border-line/60 bg-black/45 px-5 backdrop-blur-xl max-sm:h-16 max-sm:grid-cols-[minmax(0,1fr)_auto_auto] max-sm:gap-2 max-sm:px-3">
+      {/* The three-part desktop dock needs ~950px; narrower (tablets, phones on their side), the
+          controls take only the room they need and the track title gets the rest. */}
+      <div className="relative grid h-[72px] grid-cols-[minmax(240px,1fr)_minmax(380px,560px)_minmax(240px,1fr)] items-center gap-6 border-t border-line/60 bg-black/45 px-5 backdrop-blur-xl max-lg:grid-cols-[minmax(0,1fr)_auto_auto] max-lg:gap-4 max-lg:px-4 max-sm:h-16 max-sm:gap-2 max-sm:px-3 short:h-14">
         {/* progress hairline across the top of the dock */}
         <div className="absolute inset-x-0 top-0 h-[2px] bg-white/[0.04]">
           <div className="h-full bg-team-text shadow-[0_0_12px_var(--team-glow)]" style={{ width: dur ? `${(pos / dur) * 100}%` : 0 }} />
@@ -123,7 +125,7 @@ export default function MusicDock() {
               </Ctl>
             </span>
           </div>
-          <div className="flex w-full items-center gap-2.5 text-[10px] text-muted tabular max-sm:hidden">
+          <div className="flex w-full items-center gap-2.5 text-[10px] text-muted tabular max-sm:hidden short:hidden">
             <span className="w-9 text-right">{fmtTime(pos)}</span>
             <Slider.Root
               className="group relative flex h-3 flex-1 touch-none items-center select-none"
@@ -149,12 +151,14 @@ export default function MusicDock() {
         {/* volume + playlist */}
         <div className="flex items-center justify-end gap-3 max-sm:gap-0">
           <span className="contents max-sm:hidden">
-          <Equalizer active={playing} />
+          <span className="contents max-lg:hidden">
+            <Equalizer active={playing} />
+          </span>
           <Ctl label={p.muted ? "Unmute" : "Mute"} onClick={toggleMute}>
             {p.muted || p.volume === 0 ? <VolumeX className="size-4" /> : p.volume < 50 ? <Volume1 className="size-4" /> : <Volume2 className="size-4" />}
           </Ctl>
           <Slider.Root
-            className="group relative flex h-3 w-28 touch-none items-center select-none"
+            className="group relative flex h-3 w-28 touch-none items-center select-none max-lg:w-20"
             value={[p.muted ? 0 : p.volume]}
             max={100}
             step={1}
@@ -296,7 +300,7 @@ function Playlist() {
       animate={{ y: 0, opacity: 1 }}
       exit={{ y: 30, opacity: 0 }}
       transition={{ type: "spring", stiffness: 320, damping: 32 }}
-      className="absolute right-4 bottom-[80px] flex h-[420px] w-[460px] flex-col overflow-hidden rounded-2xl border border-line bg-[#0b0e14]/95 shadow-2xl backdrop-blur-xl max-sm:right-2 max-sm:bottom-[72px] max-sm:left-2 max-sm:h-[60vh] max-sm:w-auto"
+      className="absolute right-4 bottom-[80px] flex h-[420px] w-[460px] flex-col overflow-hidden rounded-2xl border border-line bg-[#0b0e14]/95 shadow-2xl backdrop-blur-xl max-sm:right-2 max-sm:bottom-[72px] max-sm:left-2 max-sm:h-[60vh] max-sm:w-auto short:bottom-[62px] short:h-[calc(100dvh-80px)]"
     >
       <div className="flex items-center justify-between border-b border-line px-4 py-3">
         <div>

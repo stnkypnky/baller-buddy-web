@@ -72,7 +72,7 @@ export default function RosterPage() {
 
   return (
     <div className="space-y-5">
-      <div className="flex items-end justify-between max-sm:flex-col max-sm:items-start max-sm:gap-3">
+      <div className="flex flex-wrap items-end justify-between gap-3 max-sm:flex-col max-sm:items-start">
         <div className="flex items-center gap-4">
           <TeamLogo espnAbbr={sel.team?.espn_abbr} size={52} glow />
           <div>

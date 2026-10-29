@@ -3,7 +3,7 @@
  *  ({name, description, parameters}); the adapters translate them. */
 
 import type { Cache } from "../cache";
-import { currentSeason, parseSeasonType, SEASON_TYPE_FULL, SEASON_TYPE_PLAYOFFS, seasonStartYear } from "../config";
+import { currentSeason, parseSeasonType, SEASON_TYPE_FULL, SEASON_TYPE_PLAYOFFS, seasonStartYear, seasonStr } from "../config";
 import * as news from "../news";
 import * as data from "../nba/data";
 import * as history from "../nba/history";
@@ -205,9 +205,20 @@ class ToolError extends Error {}
 
 type Args = Record<string, any>;
 
-function season(args: Args) {
-  const s = String(args.season ?? "").trim();
-  return s && s.length === 7 && s[4] === "-" ? s : currentSeason();
+/** The season asked for: '2025-26', '2025-2026', '2025/26', or a bare year
+ *  for the season that ended in it ('2025' is 2024-25); omitted is this one. */
+export function season(args: Args) {
+  const s = String(args.season ?? "").trim().toLowerCase();
+  if (!s || /^(current|this|now|latest)/.test(s)) return currentSeason();
+  const now = seasonStartYear(currentSeason());
+  let start = NaN;
+  const pair = /^(\d{4})\s*[-–/]\s*(\d{2}|\d{4})$/.exec(s);
+  if (pair && +pair[2].slice(-2) === (+pair[1] + 1) % 100) start = +pair[1];
+  else if (/^\d{4}$/.test(s)) start = Math.min(+s - 1, now);
+  else if (/^(last|previous)/.test(s)) start = now - 1;
+  if (!Number.isFinite(start)) throw new ToolError(`'${args.season}' isn't a season. Use the form '${currentSeason()}'.`);
+  if (start > now || start < 1946) throw new ToolError(`No NBA season ${args.season}: seasons run from 1946-47 to ${currentSeason()}.`);
+  return seasonStr(start);
 }
 
 function teamId(name: string) {
@@ -558,6 +569,12 @@ const EXECUTORS: Record<string, Exec> = {
     const abbr = games.at(-1)!.matchup.split(/\s+/)[0];
     const team = findTeam(abbr);
     const out: Record<string, unknown> = { player: p.full_name, season: s, team: team ? team.full_name : abbr };
+    if (s !== currentSeason()) {
+      // the whole season's line: every team he played for (a trade), and games started
+      const c = await history.fetchCareer(p.id, p.full_name, p.is_active, cache).catch(() => null);
+      const reg = c?.regular.find((l) => l.season === s);
+      if (reg) out.season_line = history.seasonText(reg);
+    }
     if (team) {
       const prof = await services.playerProfile(p.id, team.id, s, cache);
       if (prof.bio) out.bio = playerBio(prof.bio);

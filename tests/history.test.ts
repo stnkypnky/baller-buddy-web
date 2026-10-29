@@ -152,6 +152,19 @@ describe("history tools", () => {
     expect(JSON.parse(lead).player_rank).toMatchObject({ rank: 4, player: "Larry Bird", value: "25.8" });
   });
 
+  it("reads a season however the model writes it, and refuses a bad one instead of using this season", async () => {
+    const now = tools.season({});
+    const start = Number(now.slice(0, 4));
+    expect(tools.season({ season: "2023-24" })).toBe("2023-24");
+    expect(tools.season({ season: "2023-2024" })).toBe("2023-24");
+    expect(tools.season({ season: "2024" })).toBe("2023-24");
+    expect(tools.season({ season: "last season" })).toBe(`${start - 1}-${String(start % 100).padStart(2, "0")}`);
+    expect(() => tools.season({ season: "the good years" })).toThrow("isn't a season");
+    const [text, , ok] = await run("get_standings", { season: "2099-00" });
+    expect(ok).toBe(false);
+    expect(text).toContain("No NBA season 2099-00");
+  });
+
   it("reads background from Wikipedia", async () => {
     const [text] = await run("get_background", { topic: "Larry Bird" });
     expect(text).toContain("Larry Bird (Wikipedia, https://en.wikipedia.org/wiki/Larry_Bird)");

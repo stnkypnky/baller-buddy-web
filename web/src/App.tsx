@@ -6,6 +6,7 @@ import { BallMark, BottomNav, SectionTabs, Sidebar, TitleBar, TopBar } from "./c
 import { Skeleton } from "./components/ui";
 import { api } from "./lib/api";
 import { useSelection } from "./lib/queries";
+import { useApp } from "./lib/store";
 import { applyTeamTheme } from "./lib/theme";
 import type { Health } from "./lib/types";
 import OverviewPage from "./pages/Overview";
@@ -30,6 +31,7 @@ export default function App() {
   const sel = useSelection();
   const location = useLocation();
   const navigate = useNavigate();
+  const showMusic = useApp((s) => s.showMusic);
 
   // Re-theme the whole app whenever the selected team changes.
   useEffect(() => {
@@ -49,7 +51,8 @@ export default function App() {
   return (
     <>
       <div className="app-backdrop" />
-      <div className="relative z-10 flex h-full flex-col">
+      {/* Clear of a phone's camera cutout and rounded corners, whichever way up it's held. */}
+      <div className="relative z-10 flex h-full flex-col pt-[env(safe-area-inset-top)] pr-[env(safe-area-inset-right)] pl-[env(safe-area-inset-left)]">
         <TitleBar
           center={
             <Suspense fallback={null}>
@@ -70,7 +73,7 @@ export default function App() {
                   animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
                   exit={{ opacity: 0, y: -8, filter: "blur(4px)", transition: { duration: 0.15 } }}
                   transition={{ duration: 0.32, ease: [0.22, 1, 0.36, 1] }}
-                  className="scroll absolute inset-0 px-6 pt-1 pb-8 max-sm:px-3 max-sm:pb-6"
+                  className="scroll absolute inset-0 px-6 pt-1 pb-8 max-lg:px-4 max-sm:px-3 max-sm:pb-6 short:pb-4"
                 >
                   {booted && (
                     <PageErrorBoundary resetKey={location.pathname}>
@@ -100,9 +103,11 @@ export default function App() {
             </div>
           </main>
         </div>
-        <Suspense fallback={<div className="h-[72px] shrink-0 border-t border-line/60" />}>
-          <MusicDock />
-        </Suspense>
+        {showMusic && (
+          <Suspense fallback={<div className="h-[72px] shrink-0 border-t border-line/60 max-sm:h-16 short:h-14" />}>
+            <MusicDock />
+          </Suspense>
+        )}
         <BottomNav />
       </div>
       {booted && (

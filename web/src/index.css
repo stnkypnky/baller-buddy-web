@@ -1,5 +1,9 @@
 @import "tailwindcss";
 
+/* Short screens (a phone turned sideways): less chrome above and below the page.
+   Keep in step with useIsShort() in lib/phone.ts. */
+@custom-variant short (@media (max-height: 520px));
+
 /* Team colors are registered so they animate (smooth re-theme on team switch). */
 @property --team { syntax: "<color>"; inherits: true; initial-value: #007a33; }
 @property --team-text { syntax: "<color>"; inherits: true; initial-value: #2fbf6a; }

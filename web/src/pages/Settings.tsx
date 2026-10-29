@@ -25,7 +25,7 @@ import { Button, Chip, cx, Item, Panel, SectionTitle, Skeleton, Spinner, Stagger
 import type { ModelInfo, ProviderInfo } from "../lib/ai";
 import * as music from "../backend/music";
 import { api, del, post, put } from "../lib/api";
-import { reloadLibrary } from "../lib/player";
+import { reloadLibrary, stop as stopMusic } from "../lib/player";
 import { useSelection } from "../lib/queries";
 import { useApp } from "../lib/store";
 
@@ -506,6 +506,8 @@ function MusicSettings() {
   });
   const lib = useQuery({ queryKey: ["music-library"], queryFn: () => api<{ tracks: unknown[]; folders: string[] }>("/music/library") });
   const [busy, setBusy] = useState(false);
+  const showMusic = useApp((s) => s.showMusic);
+  const setShowMusic = useApp((s) => s.setShowMusic);
   if (!data) return <Skeleton className="h-80 rounded-[18px]" />;
 
   async function refreshLibrary(msg?: string) {
@@ -551,6 +553,16 @@ function MusicSettings() {
           <Music className="size-4 text-team-text" /> Music
         </span>
       </SectionTitle>
+      <Toggle
+        checked={showMusic}
+        onChange={(v) => {
+          // hidden, there'd be no way to pause it
+          if (!v) stopMusic();
+          setShowMusic(v);
+        }}
+        label="Show music player"
+        hint="The player bar along the bottom of the app. Off hides it on this device and stops the music."
+      />
       <Toggle
         checked={data.autoplay_on_launch}
         onChange={async (v) => {

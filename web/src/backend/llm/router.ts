@@ -5,7 +5,7 @@
  *  backend streamed. */
 
 import type { Cache } from "../cache";
-import { currentSeason } from "../config";
+import { currentSeason, seasonStartYear, seasonStr } from "../config";
 import * as news from "../news";
 import * as data from "../nba/data";
 import * as services from "../nba/services";
@@ -13,8 +13,9 @@ import { findTeam, getTeamName } from "../nba/teams";
 import * as pulse from "../pulse";
 import * as settings from "../settings";
 import * as anthropicAdapter from "./anthropicAdapter";
-import { checkAnswer, correctionSheet, issueCount, type CheckOptions } from "./factcheck";
-import { fold, ground, namedPlayerData, playerIndex, shiftDay, type PlayerIndex } from "./grounding";
+import * as nbaHistory from "../nba/history";
+import { checkAnswer, correctionSheet, issueCount, tiedPlayers, type CheckOptions, type Stints } from "./factcheck";
+import { findSeasons, fold, ground, namedPlayerData, playerIndex, shiftDay, type PlayerIndex } from "./grounding";
 import * as openaiAdapter from "./openaiAdapter";
 import { ToolsUnsupported, type ChatMessage } from "./openaiAdapter";
 import * as providers from "./providers";
@@ -30,6 +31,8 @@ const GROUND_BUDGET = { local: 3000, cloud: 7000 };
 const EARLIER_BUDGET = { local: 3000, cloud: 6000 };
 const DIGEST_CHARS = 2500;
 const GROUND_TIMEOUT_MS = 20_000;
+/** Fetching players' past teams for the fact-check. */
+const STINTS_TIMEOUT_MS = 10_000;
 /** The user doubts an answer: fetch fresh and don't lean on earlier data. */
 const RECHECK = /\b(re-?check|double[- ]check|are you sure|that'?s (wrong|not right|incorrect)|not (on|with) the|isn'?t on|no longer|wrong team)\b/i;
 
@@ -66,6 +69,9 @@ const CHAT_RULES =
   "- seasons past, best seasons, trends → get_team_history; two teams side by side → compare_teams\n" +
   "- injuries → get_injuries; news → get_news (kind=rumors for trades); schedule → get_upcoming_games\n" +
   "- a past player, a player's prime or career, any past season of his → get_player_career; leaders of any past season → get_player_leaders(season=…)\n" +
+  "- any past season (\"last year\", \"2023-24\", \"two seasons ago\") → the same tools with season=… (get_roster, get_player, get_team_report, " +
+  "get_standings, get_team_games, get_season_games); never answer about a past season from this season's roster. " +
+  "Two players were teammates only if the same team's roster that season lists both. A player's starts are in get_player_career (\"started\").\n" +
   "- two players from any eras, hypotheticals, all-time debates → compare_players; a team's past seasons → get_team_history\n" +
   "- history, accolades, playing style, rivalries, eras, rule changes → get_background; anything else → web_search\n" +
   "For hypotheticals and all-time debates: ground each player in his own numbers (his prime is his best 5-season stretch), " +
@@ -153,8 +159,9 @@ async function viewLine(teamId: number | null | undefined, season: string, cache
   const name = getTeamName(teamId);
   const st: any = await data.fetchStandings(teamId, season, cache);
   const rec = st.wins !== undefined ? ` — ${st.wins}-${st.losses}, #${st.conf_rank} in the ${st.conference}` : "";
+  const viewing = season === currentSeason() ? "" : ` The app is showing the ${season} season, but questions about any other season are fine: pass season=… to the tools.`;
   return (
-    `\n\nThe user follows the ${name} (${season})${rec}. When a question needs a team and names none ` +
+    `\n\nThe user follows the ${name} (${season})${rec}.${viewing} When a question needs a team and names none ` +
     `("the game", "last night", "their next game", "our best player"), it means the ${name}: for their game call get_game_details with team="${name}". ` +
     `Questions about tonight's games, the league, other teams or players are not limited to the ${name}.`
   );
@@ -189,7 +196,11 @@ async function todayBlock(teamId?: number | null) {
   const today = data.nbaToday();
   const named = (d: string) =>
     `${new Date(`${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}T12:00:00Z`).toLocaleDateString("en-US", { weekday: "long", timeZone: "UTC" })} ${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}`;
-  const dates = `\n\nDATES (NBA, Eastern): today ${named(today)}; yesterday ${named(shiftDay(today, -1))}; tomorrow ${named(shiftDay(today, 1))}. Tools take date=YYYY-MM-DD.`;
+  const season = currentSeason();
+  const last = seasonStr(seasonStartYear(season) - 1);
+  const dates =
+    `\n\nDATES (NBA, Eastern): today ${named(today)}; yesterday ${named(shiftDay(today, -1))}; tomorrow ${named(shiftDay(today, 1))}. Tools take date=YYYY-MM-DD.` +
+    `\nSEASONS: this season is ${season}; last season ("last year") was ${last}. Tools take season='YYYY-YY' and cover any season back to the 1940s.`;
   const sb = await data.fetchScoreboard().catch(() => null);
   if (!sb?.games.length) return dates;
   const mine = teamId ? findTeam(getTeamName(teamId))?.espn_id : undefined;
@@ -359,10 +370,13 @@ export async function* chatEvents(req: ChatRequest, cache: Cache, signal?: Abort
   let idx: PlayerIndex | null = null;
   let dataText = "";
   let cardText = "";
+  /** Past seasons the question (or the one it follows up) is about. */
+  let askedSeasons: string[] = [];
   if (mode === "chat") {
     const users = history.filter((m) => m.role === "user");
     const question = req.messages?.filter((m) => m.role === "user").at(-1)?.content ?? users.at(-1)!.content;
     const previous = users.at(-2)?.content ?? "";
+    askedSeasons = findSeasons(question).length ? findSeasons(question) : findSeasons(previous);
     const local = !!providers.PROVIDERS[(await chain(req))[0][0]]?.local;
     const recheck = RECHECK.test(question);
     if (recheck) await cache.popWhere((k) => k.startsWith("roster_v5_") || k === "hub_injuries");
@@ -468,7 +482,13 @@ export async function* chatEvents(req: ChatRequest, cache: Cache, signal?: Abort
             const known = fold(facts);
             const missing = index.find(draft, 12).filter((p) => !known.includes(fold(p.name)));
             const extra = missing.length ? await namedPlayerData(missing, cache).catch(() => "") : "";
-            yield* factCheck(draft, `${facts}\n${extra}`, index, (h) => adapter(pid)(pid, model, system, h, null, toolRunner(pid), signal), history, { teams: mode !== "brief" }, extra);
+            // Who was on which team when, for players the answer ties to a team or a teammate.
+            const tied = mode === "brief" ? [] : tiedPlayers(draft, index.find(draft, 12)).slice(0, 8);
+            const stints = new Map<number, Stints>();
+            const timeout = new Promise<void>((r) => setTimeout(r, STINTS_TIMEOUT_MS));
+            await Promise.race([Promise.all(tied.map(async (p) => stints.set(p.pid, await nbaHistory.fetchStints(p.pid, cache).catch(() => ({}))))), timeout]);
+            const opts: CheckOptions = { teams: mode !== "brief", seasons: askedSeasons, stints };
+            yield* factCheck(draft, `${facts}\n${extra}`, index, (h) => adapter(pid)(pid, model, system, h, null, toolRunner(pid), signal), history, opts, extra);
           }
         }
         if (mode === "chat") yield sse("digest", { text: digest(cardText, toolTexts) });

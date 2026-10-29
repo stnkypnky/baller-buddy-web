@@ -27,6 +27,8 @@ export interface SeasonLine {
   team: string;
   age: number | null;
   gp: number;
+  /** Games started; nba.com has no starts before 1982-83. */
+  gs: number | null;
   mpg: number;
   ppg: number;
   rpg: number;
@@ -60,6 +62,7 @@ function line(r: Row, teams?: string): SeasonLine {
     team: teams ?? str(r.TEAM_ABBREVIATION),
     age: r.PLAYER_AGE === null || r.PLAYER_AGE === undefined ? null : int(r.PLAYER_AGE),
     gp: int(r.GP),
+    gs: r.GS === null || r.GS === undefined || r.GS === "" ? null : int(r.GS),
     mpg: round(num(r.MIN), 1),
     ppg: round(pts, 1),
     rpg: round(num(r.REB), 1),
@@ -210,6 +213,28 @@ export function fetchCareer(pid: number, name: string, active: boolean, cache: C
   );
 }
 
+/** {season: teams he played for that season} — one stats.nba.com call, for
+ *  checking who was on which team when. Every team of a traded season is kept. */
+export function fetchStints(pid: number, cache: Cache): Promise<Record<string, string[]>> {
+  return cache.getOrFetch<Record<string, string[]>>(
+    `stints_v1_${pid}`,
+    async () => {
+      const j = await statsGet("playercareerstats", { PlayerID: pid, PerMode: "PerGame", LeagueID: "00" });
+      const out: Record<string, string[]> = {};
+      for (const set of ["SeasonTotalsRegularSeason", "SeasonTotalsPostSeason"]) {
+        for (const r of named(j, set)) {
+          const t = str(r.TEAM_ABBREVIATION);
+          const s = str(r.SEASON_ID);
+          if (!t || t === "TOT" || !s) continue;
+          out[s] = [...new Set([...(out[s] ?? []), t])];
+        }
+      }
+      return out;
+    },
+    { ttl: CACHE_TTL, fallback: {} },
+  );
+}
+
 // ── text forms (compact, for the model and the fact-check) ─────────────────
 
 const f1 = (v: number | null) => (v === null ? "—" : v.toFixed(1));
@@ -219,7 +244,7 @@ export function seasonText(l: SeasonLine) {
   const shoot = [l.fg_pct !== null && `FG ${f1(l.fg_pct)}%`, l.fg3_pct !== null && `3P ${f1(l.fg3_pct)}%`, l.ft_pct !== null && `FT ${f1(l.ft_pct)}%`, l.ts_pct !== null && `TS ${f1(l.ts_pct)}%`]
     .filter(Boolean)
     .join(" ");
-  return `${l.season}${l.team && l.season !== "career" ? ` ${l.team}` : ""}${l.age ? ` age ${l.age}` : ""}: ${l.gp} GP, ${f1(l.mpg)} min, ${f1(l.ppg)} pts ${f1(l.rpg)} reb ${f1(l.apg)} ast${stocks}, ${shoot}`;
+  return `${l.season}${l.team && l.season !== "career" ? ` ${l.team}` : ""}${l.age ? ` age ${l.age}` : ""}: ${l.gp} GP${l.gs !== null ? ` (${l.gs} started)` : ""}, ${f1(l.mpg)} min, ${f1(l.ppg)} pts ${f1(l.rpg)} reb ${f1(l.apg)} ast${stocks}, ${shoot}`;
 }
 
 const peakText = (p: Peak) => `${p.seasons}: ${f1(p.ppg)} pts ${f1(p.rpg)} reb ${f1(p.apg)} ast${p.ts_pct !== null ? `, TS ${f1(p.ts_pct)}%` : ""} (${p.gp} GP)`;

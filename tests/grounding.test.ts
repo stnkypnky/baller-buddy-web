@@ -4,7 +4,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Cache } from "../web/src/backend/cache";
 import { checkAnswer, correctionSheet } from "../web/src/backend/llm/factcheck";
-import { findDates, findTeams, ground, PlayerIndex, shiftDay } from "../web/src/backend/llm/grounding";
+import { findDates, findSeasons, findTeams, ground, PlayerIndex, shiftDay } from "../web/src/backend/llm/grounding";
 import * as router from "../web/src/backend/llm/router";
 import type { LeaguePlayerRow } from "../web/src/backend/nba/data";
 import * as settings from "../web/src/backend/settings";
@@ -130,7 +130,88 @@ describe("fact-check", () => {
 
   it("flags a player tied to a team he doesn't play for, not one he played against", () => {
     const r = checkAnswer("James Harden nearly sealed it for the Nets. Porter Jr. dropped 31 against the Celtics.", data, idx);
-    expect(r.problems.map((p) => [p.player.name, p.reason])).toEqual([["James Harden", "tied to the Brooklyn Nets"]]);
+    expect(r.problems.map((p) => [p.player.name, p.reason])).toEqual([["James Harden", "tied to the Brooklyn Nets in 2026-27"]]);
+  });
+});
+
+describe("fact-check: past seasons and teammates", () => {
+  const SAC = 1610612758;
+  const DET = 1610612765;
+  const CARTER = 1642269;
+  const DUREN = 1631105;
+  const FOX = 1628368;
+  const people = new PlayerIndex([
+    row(CARTER, "Devin Carter", BOS, "BOS", 9.1),
+    row(DUREN, "Jalen Duren", DET, "DET", 14.0),
+    row(FOX, "De'Aaron Fox", 1610612759, "SAS", 22.0),
+    row(1628401, "Derrick White", BOS, "BOS", 15.2),
+  ]);
+  const stints = new Map([
+    [CARTER, { "2024-25": ["SAC"], "2025-26": ["SAC"], "2026-27": ["BOS"] }],
+    [DUREN, { "2022-23": ["DET"], "2023-24": ["DET"], "2024-25": ["DET"], "2025-26": ["DET"], "2026-27": ["DET"] }],
+    [FOX, { "2023-24": ["SAC"], "2024-25": ["SAC", "SAS"], "2025-26": ["SAS"] }],
+  ]);
+  const data = "Devin Carter Jalen Duren De'Aaron Fox Derrick White";
+  const check = (answer: string, seasons: string[] = []) => checkAnswer(answer, data, people, { seasons, stints });
+
+  it("finds the seasons a question is about", () => {
+    expect(findSeasons("was he a starter for the Kings last year", "2026-27")).toEqual(["2025-26"]);
+    expect(findSeasons("the 2023-24 Celtics vs the 2022-2023 Nuggets", "2026-27")).toEqual(["2023-24", "2022-23"]);
+    expect(findSeasons("who won in the 2025 playoffs", "2026-27")).toEqual(["2024-25"]);
+    expect(findSeasons("two seasons ago", "2026-27")).toEqual(["2024-25"]);
+    expect(findSeasons("the 2024 draft", "2026-27")).toEqual([]);
+    expect(findSeasons("how are they doing this season", "2026-27")).toEqual([]);
+  });
+
+  it("catches a teammate he never had (the Carter-Duren slip)", () => {
+    const r = check("Last season Devin Carter came off the bench for the Kings, playing alongside Jalen Duren.", ["2025-26"]);
+    expect(r.problems.map((p) => p.player.name)).toEqual(["Jalen Duren"]);
+    expect(r.problems[0].reason).toContain("Kings teammate");
+    expect(correctionSheet(r.problems)).toContain("His teams by season: 2022-23 DET");
+    // no team named: the two still never shared one
+    expect(check("Carter played with Jalen Duren.", ["2025-26"]).problems.map((p) => p.player.name)).toEqual(["Jalen Duren"]);
+  });
+
+  it("accepts a past team and a real past teammate", () => {
+    expect(check("Devin Carter started 20 games for the Kings in 2025-26.").problems).toEqual([]);
+    expect(check("Devin Carter was a Kings guard in 2024-25, playing alongside De'Aaron Fox.").problems).toEqual([]);
+    expect(check("Carter came off the bench for the Kings next to Fox.", ["2024-25"]).problems).toEqual([]);
+    // Fox was traded to San Antonio in 2024-25, so "last year" (2025-26) he wasn't a King
+    expect(check("Devin Carter was a Kings guard last year, playing alongside De'Aaron Fox.").problems.map((p) => p.player.name)).toEqual(["De'Aaron Fox"]);
+  });
+
+  it("still holds this season to this season's team", () => {
+    const r = check("Devin Carter is currently the Kings' backup point guard.", ["2025-26"]);
+    expect(r.problems.map((p) => [p.player.name, p.reason])).toEqual([["Devin Carter", "tied to the Sacramento Kings in 2026-27"]]);
+    expect(check("Carter now plays alongside Derrick White.").problems).toEqual([]);
+  });
+
+  it("grounds a question about last season in that season's data", async () => {
+    const COLS = ["SEASON_ID", "TEAM_ABBREVIATION", "PLAYER_AGE", "GP", "GS", "MIN", "PTS", "REB", "AST"];
+    const career = { resultSets: [{ name: "SeasonTotalsRegularSeason", headers: COLS, rowSet: [["2024-25", "SAC", 22, 36, 2, 13.1, 4.0, 2.1, 1.1], ["2025-26", "SAC", 23, 70, 31, 24.5, 9.8, 3.4, 3.2]] }] };
+    const calls = serve([
+      ["playercareerstats", career],
+      ["playerawards", { resultSets: [] }],
+      ["commonplayerinfo", resultSet([{ DISPLAY_FIRST_LAST: "Devin Carter" }])],
+      ["leaguedashplayerstats", (u: string) => {
+        const team = new URL(u).searchParams.get("TeamID");
+        const s = new URL(u).searchParams.get("Season");
+        const rows = s === "2025-26" && team === String(SAC)
+          ? [{ PLAYER_ID: CARTER, PLAYER_NAME: "Devin Carter", TEAM_ID: SAC, TEAM_ABBREVIATION: "SAC", GP: 70, MIN: 24.5, PTS: 9.8 }, { PLAYER_ID: 5, PLAYER_NAME: "Keegan Murray", TEAM_ID: SAC, TEAM_ABBREVIATION: "SAC", GP: 74, MIN: 33, PTS: 15.5 }]
+          : [];
+        return resultSet(rows, ["PLAYER_ID", "PLAYER_NAME", "TEAM_ID", "TEAM_ABBREVIATION", "GP", "MIN", "PTS"]);
+      }],
+      ["commonteamroster", resultSet([], ["PLAYER_ID", "PLAYER", "POSITION", "HOW_ACQUIRED"])],
+      ["leaguestandingsv3", resultSet([{ TeamID: SAC, Conference: "West", PlayoffRank: 11, WINS: 38, LOSSES: 44 }])],
+      ["injuries", { injuries: [] }],
+      ["scoreboard", { events: [] }],
+    ]);
+    const g = await ground("was Devin Carter a starter for the Kings last year?", { followed: null, cache: new Cache({ persist: false }), budget: 7000, index: people });
+    expect(g.cards.map((c) => c.label).slice(0, 2)).toEqual(["Devin Carter 2025-26", "Kings 2025-26"]);
+    expect(g.block).toContain("PLAYER Devin Carter in 2025-26 — regular season 2025-26 SAC age 23: 70 GP (31 started)");
+    expect(g.block).toContain("ROSTER 2025-26 (everyone who played for the Kings that season");
+    expect(g.block).toContain("Keegan Murray 74 GP 33.0 min 15.5 ppg");
+    expect(calls.some((u) => u.includes("Season=2025-26"))).toBe(true);
   });
 });
 

@@ -5,7 +5,7 @@
  *  the same facts. The same name matching powers the fact-check. */
 
 import type { Cache } from "../cache";
-import { currentSeason, seasonStartYear } from "../config";
+import { currentSeason, seasonStartYear, seasonStr } from "../config";
 import * as news from "../news";
 import * as data from "../nba/data";
 import * as history from "../nba/history";
@@ -206,6 +206,36 @@ export function findDates(text: string, today = data.nbaToday()): string[] {
   return out.slice(0, 3);
 }
 
+// ── seasons ──────────────────────────────────────────────────────────────────
+
+const COUNT: Record<string, number> = { one: 1, a: 1, two: 2, three: 3, four: 4, five: 5 };
+
+/** Past seasons a text refers to ("last year", "2024-25", "two seasons ago",
+ *  "the 2025 playoffs"), newest first. The current season isn't listed. */
+export function findSeasons(text: string, current = currentSeason()): string[] {
+  const f = fold(text);
+  const now = seasonStartYear(current);
+  const out: number[] = [];
+  const add = (start: number) => start < now && start >= 1946 && !out.includes(start) && out.push(start);
+  if (/\b(last|previous|past|prior) (season|year)\b|\b(a|one) (season|year) ago\b|\blast years?\b/.test(f)) add(now - 1);
+  if (/\b(season|year) before last\b/.test(f)) add(now - 2);
+  for (const m of f.matchAll(/\b(one|two|three|four|five|\d) (seasons|years) ago\b/g)) add(now - (COUNT[m[1]] ?? +m[1]));
+  // "2024-25", "2024-2025", "2024/25"
+  for (const m of f.matchAll(/\b(19[4-9]\d|20\d\d)\s*[-–/]\s*(\d{2}|\d{4})\b/g)) {
+    const start = +m[1];
+    if (+m[2].slice(-2) === (start + 1) % 100) add(start);
+  }
+  // "the 24-25 season", "'24-25"
+  for (const m of f.matchAll(/(?:^|[^\d])(\d\d)-(\d\d) season\b|'(\d\d)-(\d\d)\b/g)) {
+    const a = +(m[1] ?? m[3]);
+    const b = +(m[2] ?? m[4]);
+    if ((a + 1) % 100 === b) add(a > 45 ? 1900 + a : 2000 + a);
+  }
+  // A bare year is the season that ended in it: "the 2025 playoffs" is 2024-25 (a draft isn't a season).
+  for (const m of f.matchAll(/\b(?:in|the|of|during|for|from|since)\s+(19[4-9]\d|20\d\d)(?![\d/–-])(?! draft)/g)) add(+m[1] - 1);
+  return out.sort((a, b) => b - a).slice(0, 2).map(seasonStr);
+}
+
 // ── fact cards ───────────────────────────────────────────────────────────────
 
 export interface Card {
@@ -240,7 +270,7 @@ async function playerCard(p: IndexedPlayer, injuries: Record<string, news.Injury
 }
 
 /** Questions about the past: a prime, a career, an era, a hypothetical, a year. */
-export const HISTORY = /\b(prime|peak|career|all[- ]time|greatest|goat|best season|back in|in his day|era|eras|hypothetical|who would win|would (?:win|beat)|vs\.?|versus|compare[ds]?|comparison|legacy|hall of fame|rookie (?:year|season)|retired|legend|(?:19[4-9]\d|20[0-2]\d)(?:-\d\d)?|'\d\d)\b/i;
+export const HISTORY = /\b(prime|peak|career|all[- ]time|greatest|goat|best season|back in|in his day|era|eras|hypothetical|who would win|would (?:win|beat)|vs\.?|versus|compare[ds]?|comparison|legacy|hall of fame|rookie (?:year|season)|retired|legend|(?:last|previous|past|prior) (?:season|year)|(?:seasons|years) ago|used to|formerly|(?:19[4-9]\d|20[0-2]\d)(?:-\d\d)?|'\d\d)\b/i;
 
 /** A player's career in a few lines: years, teams, averages, best stretch, honors. */
 export async function careerCard(p: IndexedPlayer, cache: Cache): Promise<Card | null> {
@@ -289,6 +319,38 @@ async function teamCard(t: Team, cache: Cache, injuries: Record<string, news.Inj
   return { label: t.nickname, text: lines.join("\n") };
 }
 
+/** One player in one past season: team(s), games and starts, averages, playoffs.
+ *  `teams` are that season's teams, so their rosters can be pulled too. */
+async function playerSeasonCard(p: IndexedPlayer, season: string, cache: Cache): Promise<(Card & { teams: string[] }) | null> {
+  const c = await history.fetchCareer(p.pid, p.name, !p.retired, cache).catch(() => null);
+  if (!c) return null;
+  const reg = c.regular.find((l) => l.season === season);
+  const po = c.playoffs.find((l) => l.season === season);
+  const label = `${c.name} ${season}`;
+  if (!reg) return { label, teams: [], text: `PLAYER ${c.name} in ${season}: no NBA games that season (career ${c.years}, teams ${c.teams.join(", ")})` };
+  const lines = [`PLAYER ${c.name} in ${season} — regular season ${history.seasonText(reg)}`, po ? `playoffs ${history.seasonText(po)}` : "no playoff games"];
+  return { label, teams: reg.team.split("/"), text: lines.join(" · ") };
+}
+
+/** A team in one past season: record, seed, and everyone who played for it. */
+async function pastTeamCard(t: Team, season: string, cache: Cache): Promise<Card> {
+  const [standings, roster] = await Promise.all([
+    data.fetchAllStandings(season, cache).catch(() => [] as data.StandingRow[]),
+    data.fetchRoster(t.id, season, cache).catch(() => [] as data.RosterRow[]),
+  ]);
+  const st = standings.find((r) => r.team_id === t.id);
+  const head = [`TEAM ${t.full_name} in ${season}`, st && `record ${st.wins}-${st.losses}`, st && `${st.conference} #${st.rank}`].filter(Boolean).join(" · ");
+  const played = roster.filter((p) => p.gp > 0).sort((a, b) => b.mpg - a.mpg);
+  const players = played.map((p) => `${p.name}${p.pos ? ` ${p.pos}` : ""} ${p.gp} GP ${p.mpg.toFixed(1)} min ${p.ppg.toFixed(1)} ppg`);
+  const lines = [head];
+  lines.push(
+    players.length
+      ? `ROSTER ${season} (everyone who played for the ${t.nickname} that season, most minutes first; anyone not listed did NOT play for them in ${season}): ${players.join(", ")}`
+      : `ROSTER ${season}: couldn't be loaded right now`,
+  );
+  return { label: `${t.nickname} ${season}`, text: lines.join("\n") };
+}
+
 async function dateCard(day: string): Promise<Card> {
   const sb = await data.fetchScoreboard(day);
   const iso = isoOf(day);
@@ -310,7 +372,19 @@ export interface Grounding {
   block: string;
 }
 
-export const GROUNDING_HEADER = "DATA FOR THIS QUESTION (current, from nba.com and ESPN; it overrides anything you remember):";
+export const GROUNDING_HEADER =
+  "DATA FOR THIS QUESTION (from nba.com and ESPN; this season unless a card names another season; it overrides anything you remember):";
+
+/** Cards for one past season: each named player's season, and the rosters of
+ *  the teams named or that those players were on (the followed team if neither). */
+async function seasonCards(season: string, teams: Team[], players: IndexedPlayer[], followed: Team | undefined, cache: Cache): Promise<Card[]> {
+  const mine = (await Promise.all(players.slice(0, 3).map((p) => playerSeasonCard(p, season, cache).catch(() => null)))).filter((c) => !!c);
+  const their = mine.flatMap((c) => c.teams).map((abbr) => TEAMS.find((t) => t.abbreviation === abbr)).filter((t): t is Team => !!t);
+  const list = [...teams, ...their].filter((t, i, all) => all.findIndex((x) => x.id === t.id) === i);
+  if (!list.length && !players.length && followed) list.push(followed);
+  const rosters = await Promise.all(list.slice(0, 3).map((t) => pastTeamCard(t, season, cache).catch(() => null)));
+  return [...mine.map(({ label, text }) => ({ label, text })), ...rosters.filter((c) => !!c)];
+}
 
 /** Fact cards for a question. `followed` is the team the user follows; its
  *  card is always included. Cards that don't fit `budget` are dropped whole. */
@@ -325,18 +399,21 @@ export async function ground(
   const teams = findTeams(subject).slice(0, 3);
   const players = idx.find(subject, 4);
   const dates = findDates(subject);
+  // "last year", "2023-24": a follow-up keeps the season the conversation was on
+  const seasons = findSeasons(question).length ? findSeasons(question) : findSeasons(subject);
   const injuries = await news.injuries(cache).catch(() => ({}) as Record<string, news.InjuryRow[]>);
   const followed = opts.followed ? TEAMS.find((t) => t.id === opts.followed) : undefined;
   const teamList = [...teams, ...(followed && !teams.some((t) => t.id === followed.id) ? [followed] : [])];
 
   const settled = await Promise.allSettled([
+    ...seasons.map((s) => seasonCards(s, teams, players, followed, cache)),
     ...dates.map((d) => dateCard(d)),
     // retired players get their career; active ones their season, plus the career when the question reaches back
     ...players.map((p, i) => (p.retired ? careerCard(p, cache) : playerCard(p, injuries, cache, i < 3))),
     ...(HISTORY.test(subject) ? players.filter((p) => !p.retired).slice(0, 3).map((p) => careerCard(p, cache)) : []),
     ...teamList.map((t) => teamCard(t, cache, injuries)),
   ]);
-  const cards = settled.flatMap((r) => (r.status === "fulfilled" && r.value ? [r.value] : []));
+  const cards = settled.flatMap((r) => (r.status === "fulfilled" && r.value ? (Array.isArray(r.value) ? r.value : [r.value]) : []));
   // The followed team's card is reserved first; the rest fill in by order of mention.
   const followedCard = followed ? cards.find((c) => c.label === followed.nickname) : undefined;
   const kept: Card[] = [];
