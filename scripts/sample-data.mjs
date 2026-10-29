@@ -196,7 +196,7 @@ function espnNews() {
 
 function injuries() {
   return { injuries: [
-    { id: "2", displayName: "Boston Celtics", injuries: [{ athlete: { displayName: "Kristaps Porzingis", position: { abbreviation: "C" } }, status: "Out", details: { side: "Left", type: "Ankle", detail: "Sprain", returnDate: "2026-11-10" }, shortComment: "Porzingis will miss at least two weeks.", date: "2026-10-26" }] },
+    { id: "2", displayName: "Boston Celtics", injuries: [{ athlete: { displayName: "Kristaps Porzingis", position: { abbreviation: "C" } }, status: "Out", details: { side: "Left", type: "Ankle", detail: "Sprain", returnDate: "2026-11-10" }, shortComment: "Porzingis (ankle) will miss at least two weeks after an MRI on Monday confirmed a sprain, coach Joe Mazzulla told reporters before Wednesday's practice, and he'll be re-evaluated then.", date: "2026-10-26" }] },
     { id: "13", displayName: "Los Angeles Lakers", injuries: [{ athlete: { displayName: "Anthony Davis", position: { abbreviation: "F" } }, status: "Day-To-Day", details: { type: "Knee" }, shortComment: "Questionable for Friday.", date: "2026-10-26" }] },
   ] };
 }

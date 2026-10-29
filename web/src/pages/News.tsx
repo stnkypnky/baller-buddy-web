@@ -166,7 +166,8 @@ export default function NewsPage() {
           )}
         </Item>
 
-        <Item className="col-span-12 space-y-5 xl:col-span-4">
+        {/* Stacked (phones, tablets), the briefing and the team's injuries come before the feed. */}
+        <Item className="col-span-12 space-y-5 max-xl:order-first xl:col-span-4">
           <AiInline
             title={BRIEF_COPY[tab].title}
             cta="Brief me"
@@ -177,6 +178,11 @@ export default function NewsPage() {
             hint={BRIEF_COPY[tab].hint(sel.team?.nickname ?? "team")}
           />
           <TeamInjuries rows={data?.injuries.team} loading={isLoading} team={sel.team?.nickname} />
+          <div className="max-xl:hidden">
+            <Links links={data?.links ?? []} />
+          </div>
+        </Item>
+        <Item className="col-span-12 xl:hidden">
           <Links links={data?.links ?? []} />
         </Item>
       </div>
@@ -283,22 +289,24 @@ function InjuryRow({ r, showTeam }: { r: Injury; showTeam?: boolean }) {
   return (
     <div className="flex gap-3 border-t border-line/60 py-3 first:border-0">
       {r.headshot ? (
-        <img src={r.headshot} alt="" className="size-11 shrink-0 rounded-full bg-surface-2 object-cover" />
+        <img src={r.headshot} alt="" className="size-11 shrink-0 rounded-full bg-surface-2 object-cover max-sm:size-9" />
       ) : (
-        <div className="size-11 shrink-0 rounded-full bg-surface-2" />
+        <div className="size-11 shrink-0 rounded-full bg-surface-2 max-sm:size-9" />
       )}
+      {/* Nothing is cut short: the name wraps beside the badge and ESPN's note shows in full. */}
       <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          <span className="truncate text-[13px] font-semibold">{r.player}</span>
-          <span className="text-[11px] text-faint">{r.position}</span>
-          <InjuryBadge status={r.status} className="ml-auto" />
+        <div className="flex items-start gap-2">
+          <span className="min-w-0 text-[13px] leading-snug font-semibold break-words">
+            {r.player} <span className="text-[11px] font-normal text-faint">{r.position}</span>
+          </span>
+          <InjuryBadge status={r.status} className="ml-auto whitespace-nowrap" />
         </div>
-        <div className="mt-0.5 text-[11px] text-muted">
+        <div className="mt-0.5 text-[11px] break-words text-muted">
           {showTeam && r.team ? `${r.team} · ` : ""}
           {r.injury || "Undisclosed"}
           {r.return_date && ` · est. return ${new Date(r.return_date + "T12:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" })}`}
         </div>
-        {r.comment && <div className="mt-1 line-clamp-2 text-xs text-fg/75">{r.comment}</div>}
+        {r.comment && <div className="mt-1 text-xs leading-relaxed break-words text-fg/75">{r.comment}</div>}
       </div>
     </div>
   );

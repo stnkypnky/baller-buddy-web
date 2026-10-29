@@ -38,6 +38,7 @@ const OPEN = {
     ["box", async (p) => p.getByRole("button", { name: "Box score" }).first().click()],
     ["teampicker", async (p) => (await p.keyboard.press("Escape"), await p.waitForTimeout(500), p.getByRole("button", { name: /Celtics/ }).first().click())],
   ],
+  "/news": [["injuries", async (p) => p.locator("main button:has-text('Injuries')").first().click()]],
   "/live": [["game", async (p) => p.locator("main button:has-text('Final')").first().click()]],
   "/ai": [
     ["typed", async (p) => p.locator("textarea").fill("Who has been better over the last ten games, the Celtics or the Knicks, and what changed in their rotations?")],
