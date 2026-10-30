@@ -4,7 +4,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as anthropicAdapter from "../web/src/backend/llm/anthropicAdapter";
-import * as credit from "../web/src/backend/llm/credit";
+import * as usage from "../web/src/backend/llm/usage";
 import * as keys from "../web/src/backend/llm/keys";
 import * as openaiAdapter from "../web/src/backend/llm/openaiAdapter";
 import * as providers from "../web/src/backend/llm/providers";
@@ -15,7 +15,7 @@ import { Cache } from "../web/src/backend/cache";
 import * as settings from "../web/src/backend/settings";
 import { resultSet, serve } from "./fake";
 
-// ── pure parsing ─────────────────────────────────────────────────────────────
+// â”€â”€ pure parsing â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function split(pieces: string[]) {
   const s = new openaiAdapter.ThinkSplitter();
@@ -54,7 +54,7 @@ describe("parsing", () => {
   });
 });
 
-// ── mock provider servers (a stubbed fetch) ──────────────────────────────────
+// â”€â”€ mock provider servers (a stubbed fetch) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const MOCK = "http://mock.local/v1";
 const calls: { openai: any[]; anthropic: any[] } = { openai: [], anthropic: [] };
@@ -225,21 +225,23 @@ describe("providers and router", () => {
   });
 });
 
-describe("claude credit", () => {
+describe("claude usage", () => {
   it("prices a response from its usage", () => {
-    expect(credit.costOf("claude-haiku-5-5", { input_tokens: 50_000, output_tokens: 100_000 })).toBeCloseTo(0.055);
-    expect(credit.costOf("claude-opus-5-5", { input_tokens: 10_000, cache_read_input_tokens: 100_000, output_tokens: 1000, server_tool_use: { web_search_requests: 2 } })).toBeCloseTo(0.04 + 0.04 + 0.02 + 0.02);
-    expect(credit.costOf("claude-haiku-5-5", { input_tokens: 200_000, output_tokens: 0 })).toBeCloseTo(0.1); // long prompts at 5x
-    expect(credit.costOf("gpt-x", { input_tokens: 1000 })).toBe(0);
+    expect(usage.costOf("claude-haiku-5-5", { input_tokens: 50_000, output_tokens: 100_000 })).toBeCloseTo(0.055);
+    expect(usage.costOf("claude-opus-5-5", { input_tokens: 10_000, cache_read_input_tokens: 100_000, output_tokens: 1000, server_tool_use: { web_search_requests: 2 } })).toBeCloseTo(0.04 + 0.04 + 0.02 + 0.02);
+    expect(usage.costOf("claude-haiku-5-5", { input_tokens: 200_000, output_tokens: 0 })).toBeCloseTo(0.1); // long prompts at 5x
+    expect(usage.costOf("gpt-x", { input_tokens: 1000 })).toBe(0);
   });
 
-  it("counts spend down from the balance the user set", async () => {
-    await settings.update("ai", { claude_credit: { balance: 5, spent: 0 } });
-    await credit.recordSpend("claude-opus-5-5", { input_tokens: 0, output_tokens: 50_000 });
-    expect((await settings.get("ai")).claude_credit).toEqual({ balance: 5, spent: 1 });
-    await settings.update("ai", { claude_credit: { balance: null, spent: 0 } });
-    await credit.recordSpend("claude-opus-5-5", { input_tokens: 0, output_tokens: 50_000 });
-    expect((await settings.get("ai")).claude_credit.spent).toBe(0); // not tracking
+  it("adds up spend until reset", async () => {
+    await usage.resetSpend();
+    await usage.recordSpend("claude-opus-5-5", { input_tokens: 0, output_tokens: 50_000 });
+    await usage.recordSpend("claude-opus-5-5", { input_tokens: 0, output_tokens: 25_000 });
+    const u = (await settings.get("ai")).claude_usage;
+    expect(u.spent).toBeCloseTo(1.5);
+    expect(u.since).not.toBe("");
+    await usage.resetSpend();
+    expect((await settings.get("ai")).claude_usage.spent).toBe(0);
   });
 });
 
@@ -284,7 +286,7 @@ describe("tools", () => {
   });
 });
 
-// ── news brief ───────────────────────────────────────────────────────────────
+// â”€â”€ news brief â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function hub(): news.Hub {
   const art = (source: string, title: string) => ({ source, title, summary: "sum " + title }) as news.Article;

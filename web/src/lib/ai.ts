@@ -310,14 +310,12 @@ export interface AiSettings {
   web_default: boolean;
   factcheck: boolean;
   model_size?: "auto" | "small" | "large";
-  claude_credit?: { balance: number | null; spent: number };
+  claude_usage?: { spent: number; since: string };
 }
 
-/** "$#.## remaining" for Claude credit, or "" when no balance is set. */
-export function creditLeft(s?: AiSettings): string {
-  const c = s?.claude_credit;
-  if (!c || c.balance === null) return "";
-  return `$${Math.max(0, c.balance - c.spent).toFixed(2)} remaining`;
+/** "$#.## used": this app's estimated Claude spend since the last reset. */
+export function claudeUsed(s?: AiSettings): string {
+  return `$${(s?.claude_usage?.spent ?? 0).toFixed(2)} used`;
 }
 
 export interface ModelInfo {

@@ -3,7 +3,7 @@
  *  allows direct browser calls, and the key is the user's own. */
 
 import Anthropic from "@anthropic-ai/sdk";
-import { recordSpend } from "./credit";
+import { recordSpend } from "./usage";
 import { getKey } from "./keys";
 import type { AdapterEvent, ChatMessage, RunTool } from "./openaiAdapter";
 import { validateArgs, type ToolSpec } from "./tools";

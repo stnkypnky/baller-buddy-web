@@ -1,7 +1,6 @@
-/** Claude credit, estimated: the balance the user entered in Settings minus
- *  what this app has spent since, priced from each response's token usage.
- *  Anthropic's API has no balance endpoint for ordinary API keys, so spend
- *  from other apps or the Console isn't seen. */
+/** What this app has spent on Claude since the user last reset the count,
+ *  priced from each response's token usage (an estimate: Anthropic's API has
+ *  no balance or billing endpoint for ordinary API keys). */
 
 import * as settings from "../settings";
 
@@ -48,16 +47,21 @@ export function costOf(model: string, u: Usage): number {
 
 let queue: Promise<unknown> = Promise.resolve();
 
-/** Add a response's cost to the running spend (only once a balance is set). */
+/** Add a response's cost to the running total. */
 export function recordSpend(model: string, usage: Usage) {
   const cost = costOf(model, usage);
   if (!cost) return queue;
   queue = queue
     .then(async () => {
-      const c = (await settings.get("ai")).claude_credit;
-      if (c.balance === null) return;
-      await settings.update("ai", { claude_credit: { ...c, spent: c.spent + cost } });
+      const u = (await settings.get("ai")).claude_usage;
+      await settings.update("ai", { claude_usage: { since: u.since || new Date().toISOString(), spent: u.spent + cost } });
     })
-    .catch((e) => console.warn("credit tracking failed:", e));
+    .catch((e) => console.warn("usage tracking failed:", e));
+  return queue;
+}
+
+/** Start the count over at $0.00. */
+export function resetSpend() {
+  queue = queue.then(() => settings.update("ai", { claude_usage: { spent: 0, since: new Date().toISOString() } })).catch(() => {});
   return queue;
 }

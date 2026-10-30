@@ -16,8 +16,8 @@ export const DEFAULTS = {
     web_default: false,
     factcheck: true, // check named players against current data, revise once if needed
     model_size: "auto" as "auto" | "small" | "large", // small models get fewer tools and tighter rules
-    // Claude credit the user entered (dollars) and this app's estimated spend since
-    claude_credit: { balance: null as number | null, spent: 0 },
+    // this app's estimated Claude spend (dollars) since `since` (ISO), when the user last reset it
+    claude_usage: { spent: 0, since: "" },
   },
   alerts: {
     enabled: true,

@@ -8,6 +8,7 @@ import * as config from "./config";
 import * as keys from "./llm/keys";
 import * as providers from "./llm/providers";
 import * as chatRouter from "./llm/router";
+import * as usage from "./llm/usage";
 import * as music from "./music";
 import * as news from "./news";
 import * as data from "./nba/data";
@@ -282,12 +283,7 @@ route("PUT", "/ai/settings", async (_m, _q, body) => {
     patch.models = { ...ai.models, [pid]: body.model };
   }
   if (body?.reset_no_tools) patch.no_tools = [];
-  // a new balance restarts the spend count; null stops tracking
-  if (body?.claude_balance !== undefined) {
-    const b = body.claude_balance === null || body.claude_balance === "" ? null : Number(body.claude_balance);
-    if (b !== null && !(Number.isFinite(b) && b >= 0)) throw new ApiError(400, "balance must be a dollar amount");
-    patch.claude_credit = { balance: b === null ? null : Math.round(b * 100) / 100, spent: 0 };
-  }
+  if (body?.reset_claude_usage) await usage.resetSpend();
   return settings.update("ai", patch);
 });
 

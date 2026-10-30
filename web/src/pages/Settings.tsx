@@ -22,7 +22,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { openKeyPage, useModels, useProviders } from "../components/AiParts";
 import { Button, Chip, cx, Item, Panel, SectionTitle, Skeleton, Spinner, Stagger, TeamLogo } from "../components/ui";
-import { creditLeft, exportReports, useReports, type ModelInfo, type ProviderInfo } from "../lib/ai";
+import { claudeUsed, exportReports, useReports, type ModelInfo, type ProviderInfo } from "../lib/ai";
 import * as music from "../backend/music";
 import { api, del, post, put } from "../lib/api";
 import { reloadLibrary, stop as stopMusic } from "../lib/player";
@@ -228,7 +228,7 @@ function ProviderCard({ p, active, running }: { p: ProviderInfo; active: boolean
             </Button>
           </div>
         )}
-        {p.kind === "anthropic" && p.configured && <ClaudeCredit />}
+        {p.kind === "anthropic" && p.configured && <ClaudeUsage />}
       </div>
 
       {result && (
@@ -260,61 +260,30 @@ function ProviderCard({ p, active, running }: { p: ProviderInfo; active: boolean
   );
 }
 
-/** The Claude credit balance to count down from. Anthropic doesn't report it
- *  to API keys, so the user copies it from the Console's billing page. */
-function ClaudeCredit() {
+/** This app's estimated Claude spend, counted from each answer's token usage,
+ *  with a reset back to $0.00. */
+function ClaudeUsage() {
   const { data } = useProviders();
   const qc = useQueryClient();
-  const [amount, setAmount] = useState("");
-  const left = creditLeft(data?.settings);
+  const since = data?.settings.claude_usage?.since;
 
-  async function save(balance: string | null) {
-    try {
-      await put("/ai/settings", { claude_balance: balance });
-      setAmount("");
-      qc.invalidateQueries({ queryKey: ["ai-providers"] });
-    } catch (e) {
-      toast.error(String((e as Error).message));
-    }
+  async function reset() {
+    await put("/ai/settings", { reset_claude_usage: true });
+    qc.invalidateQueries({ queryKey: ["ai-providers"] });
+    toast("Claude usage reset to $0.00");
   }
 
   return (
-    <div className="space-y-1.5">
-      <div className="flex gap-2">
-        <div className="flex h-10 min-w-0 flex-1 items-center rounded-xl border border-line bg-black/30 px-3 text-[13px] focus-within:border-team-text/40">
-          <span className="text-muted">$</span>
-          <input
-            inputMode="decimal"
-            value={amount}
-            onChange={(e) => setAmount(e.target.value.replace(/[^\d.]/g, ""))}
-            onKeyDown={(e) => e.key === "Enter" && amount && save(amount)}
-            placeholder={left ? "Update credit balance" : "Credit balance (optional)"}
-            className="min-w-0 flex-1 bg-transparent pl-1 outline-none"
-          />
-        </div>
-        <Button variant="outline" onClick={() => save(amount)} disabled={!amount}>
-          Set
-        </Button>
-      </div>
-      <div className="flex items-center gap-2 text-[11px] text-faint">
-        {left ? (
-          <>
-            <span className="font-semibold text-win">{left}</span>
-            <span>· estimated from this app's usage</span>
-            <button onClick={() => save(null)} className="ml-auto underline hover:text-fg">
-              Stop tracking
-            </button>
-          </>
-        ) : (
-          <span>
-            Copy it from{" "}
-            <button onClick={() => openKeyPage("https://console.anthropic.com/settings/billing")} className="underline hover:text-fg">
-              Console → Billing
-            </button>{" "}
-            to see what's left.
-          </span>
-        )}
-      </div>
+    <div className="flex h-10 items-center gap-2 rounded-xl border border-line bg-black/30 px-3 text-[13px]">
+      <span className="font-semibold text-win" title={`$${(data?.settings.claude_usage?.spent ?? 0).toFixed(4)}`}>
+        {claudeUsed(data?.settings)}
+      </span>
+      <span className="min-w-0 truncate text-[11px] text-faint">
+        {since ? `since ${new Date(since).toLocaleDateString(undefined, { month: "short", day: "numeric" })}` : "by this app"} · estimate
+      </span>
+      <Button variant="ghost" size="sm" onClick={reset} className="ml-auto">
+        Reset
+      </Button>
     </div>
   );
 }

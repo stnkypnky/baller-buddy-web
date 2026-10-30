@@ -6,7 +6,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { AssistantBody, ModelPicker, useProviders } from "../components/AiParts";
 import { BallMark } from "../components/shell";
 import { cx, IconButton, TeamLogo, Tip } from "../components/ui";
-import { creditLeft, sendChat, stopChat, useChatStore } from "../lib/ai";
+import { claudeUsed, sendChat, stopChat, useChatStore } from "../lib/ai";
 import { useIsPhone } from "../lib/phone";
 import { useSelection } from "../lib/queries";
 
@@ -35,8 +35,8 @@ export default function AIPage() {
     if (providers.data) setWeb(providers.data.settings.web_default);
   }, [providers.data?.settings.web_default]);
 
-  // Claude credit left, only while Claude answers; refreshed after each answer.
-  const credit = providers.data?.providers.find((p) => p.id === providers.data.settings.provider)?.kind === "anthropic" ? creditLeft(providers.data.settings) : "";
+  // Claude spend, only while Claude answers; refreshed after each answer.
+  const credit = providers.data?.providers.find((p) => p.id === providers.data.settings.provider)?.kind === "anthropic" ? claudeUsed(providers.data.settings) : "";
   useEffect(() => {
     if (!streaming) qc.invalidateQueries({ queryKey: ["ai-providers"] });
   }, [streaming, qc]);
