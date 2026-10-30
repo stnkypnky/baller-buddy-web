@@ -1,11 +1,12 @@
 import * as Switch from "@radix-ui/react-switch";
+import { useQueryClient } from "@tanstack/react-query";
 import { ArrowUp, Eraser, Globe, Square } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AssistantBody, ModelPicker, useProviders } from "../components/AiParts";
 import { BallMark } from "../components/shell";
 import { cx, IconButton, TeamLogo, Tip } from "../components/ui";
-import { sendChat, stopChat, useChatStore } from "../lib/ai";
+import { creditLeft, sendChat, stopChat, useChatStore } from "../lib/ai";
 import { useIsPhone } from "../lib/phone";
 import { useSelection } from "../lib/queries";
 
@@ -13,6 +14,7 @@ export default function AIPage() {
   const sel = useSelection();
   const { turns, streaming, clear } = useChatStore();
   const providers = useProviders();
+  const qc = useQueryClient();
   const [text, setText] = useState("");
   const [web, setWeb] = useState(false);
   const scroller = useRef<HTMLDivElement>(null);
@@ -31,7 +33,13 @@ export default function AIPage() {
 
   useEffect(() => {
     if (providers.data) setWeb(providers.data.settings.web_default);
-  }, [providers.data]);
+  }, [providers.data?.settings.web_default]);
+
+  // Claude credit left, only while Claude answers; refreshed after each answer.
+  const credit = providers.data?.providers.find((p) => p.id === providers.data.settings.provider)?.kind === "anthropic" ? creditLeft(providers.data.settings) : "";
+  useEffect(() => {
+    if (!streaming) qc.invalidateQueries({ queryKey: ["ai-providers"] });
+  }, [streaming, qc]);
 
   // Keep the newest tokens in view while streaming.
   useEffect(() => {
@@ -69,7 +77,10 @@ export default function AIPage() {
           </div>
           <div>
             <h1 className="display text-3xl leading-none font-bold uppercase">AI Analyst</h1>
-            <div className="mt-1 text-xs text-muted">Pulls live stats with tools · {sel.season}</div>
+            <div className="mt-1 text-xs text-muted">
+              Pulls live stats with tools · {sel.season}
+              {credit && <span className="text-win"> · {credit}</span>}
+            </div>
           </div>
         </div>
         <div className="flex items-center gap-2">

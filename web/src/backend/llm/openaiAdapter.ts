@@ -15,7 +15,9 @@ export type AdapterEvent =
   | { type: "token" | "reasoning"; text: string }
   | { type: "tool_call"; id: string; name: string; args: Record<string, unknown> }
   | { type: "tool_result"; id: string; name: string; summary: string; ok: boolean }
-  | { type: "error"; message: string };
+  | { type: "error"; message: string }
+  /** What a hosted web search found, for the fact-check (not shown). */
+  | { type: "web_text"; text: string };
 
 export type RunTool = (name: string, args: Record<string, unknown>) => Promise<[string, string, boolean]>;
 export interface ChatMessage {

@@ -127,6 +127,8 @@ describe("model size", () => {
     expect(sizeOf("openrouter", "qwen/qwen3-235b-a22b")).toBe("large");
     expect(sizeOf("openai", "gpt-4o-mini")).toBe("small");
     expect(sizeOf("anthropic", "claude-opus-5-5")).toBe("large");
+    expect(sizeOf("anthropic", "claude-haiku-5-5")).toBe("large");
+    expect(sizeOf("anthropic", "claude-haiku-4-5")).toBe("small");
     expect(sizeOf("lmstudio", "local-model")).toBe("small");
     expect(sizeOf("custom", "openai/gpt-oss-20b", "large")).toBe("large");
   });
@@ -138,7 +140,15 @@ describe("model size", () => {
     expect(names("who wins tonight?")).toContain("get_game_previews");
     expect(names("Jordan or LeBron in their prime?")).toEqual(expect.arrayContaining(["compare_players", "get_player_career"]));
     expect(router.toolsFor("small", "anything").length).toBeLessThanOrEqual(9);
-    expect(router.toolsFor("large", "anything").length).toBe(20);
+    expect(router.toolsFor("large", "anything").length).toBe(19);
+  });
+
+  it("offers web search only when the user turns it on", () => {
+    const has = (size: "small" | "large", web: boolean) => router.toolsFor(size, "any trade news?", web).some((t) => t.name === "web_search");
+    expect(has("large", false)).toBe(false);
+    expect(has("large", true)).toBe(true);
+    expect(has("small", false)).toBe(false);
+    expect(has("small", true)).toBe(true);
   });
 });
 

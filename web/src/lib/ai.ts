@@ -310,6 +310,14 @@ export interface AiSettings {
   web_default: boolean;
   factcheck: boolean;
   model_size?: "auto" | "small" | "large";
+  claude_credit?: { balance: number | null; spent: number };
+}
+
+/** "$#.## remaining" for Claude credit, or "" when no balance is set. */
+export function creditLeft(s?: AiSettings): string {
+  const c = s?.claude_credit;
+  if (!c || c.balance === null) return "";
+  return `$${Math.max(0, c.balance - c.spent).toFixed(2)} remaining`;
 }
 
 export interface ModelInfo {

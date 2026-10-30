@@ -89,6 +89,14 @@ const CHAT_RULES =
   "Format answers in Markdown: a one-line takeaway first, then short sections or bullets; " +
   "use a compact table when comparing several numbers. Keep it tight unless asked for depth.";
 
+const WEB_ON =
+  "WEB: you can search the web (web_search). Use it for breaking news, injuries, trades, signings, quotes and anything the NBA tools " +
+  "don't cover or that may have changed since your training. Web results count as data: prefer the newest, say when something is " +
+  "a report or a rumor, and name the source.";
+const WEB_OFF =
+  "WEB: web search is switched off for this message. If a question needs the internet (breaking news the tools don't have), answer " +
+  "with what you have and mention the user can turn on the web switch (🌐) next to the chat box.";
+
 // Small models: the same contract in fewer words, and no tool menu (they're
 // handed only the tools the question needs).
 const SMALL_RULES =
@@ -116,12 +124,14 @@ const SMALL_MAX_TOOLS = 9;
 const SMALL_TEMPERATURE = 0.2;
 
 /** The tools for this turn: all of them for a large model; for a small one,
- *  the few the question needs (a long menu is where small models go wrong). */
-export function toolsFor(size: "small" | "large", question: string): tools.ToolSpec[] {
-  if (size === "large") return tools.SPECS;
+ *  the few the question needs (a long menu is where small models go wrong).
+ *  Web search only when the user switched it on. */
+export function toolsFor(size: "small" | "large", question: string, web = false): tools.ToolSpec[] {
+  if (size === "large") return tools.SPECS.filter((s) => web || s.name !== "web_search");
   const names = [...ALWAYS];
   for (const [re, add] of TOOLS_BY_TOPIC) if (re.test(question)) names.push(...add);
   const pick = [...new Set(names)].slice(0, SMALL_MAX_TOOLS);
+  if (web) pick.push("web_search");
   return tools.SPECS.filter((s) => pick.includes(s.name));
 }
 
@@ -225,7 +235,9 @@ export async function buildSystem(req: ChatRequest, cache: Cache, withTools: boo
     }
     return `${persona}\n\n${MODE_PROMPTS[mode]}${extra}`;
   }
-  let sys = `${persona}\n\n${SCOPE_RULE}\n\n${size === "small" ? SMALL_RULES : CHAT_RULES}${await viewLine(req.team_id, season, cache)}${await todayBlock(req.team_id)}`;
+  const rules = size === "small" ? SMALL_RULES : req.web ? CHAT_RULES : CHAT_RULES.replace("; anything else → web_search", "");
+  const web = withTools || req.web ? `\n\n${req.web ? WEB_ON : WEB_OFF}` : "";
+  let sys = `${persona}\n\n${SCOPE_RULE}\n\n${rules}${web}${await viewLine(req.team_id, season, cache)}${await todayBlock(req.team_id)}`;
   if (!withTools) {
     const snapshot = [
       req.team_id ? await services.teamContext(req.team_id, season, cache).catch(() => "") : "",
@@ -389,7 +401,17 @@ async function serverContext(req: ChatRequest, cache: Cache) {
   return "";
 }
 
-const adapter = (pid: string) => (providers.get(pid).kind === "anthropic" ? anthropicAdapter.stream : openaiAdapter.stream);
+const isClaude = (pid: string) => providers.get(pid).kind === "anthropic";
+
+/** One model run. Claude searches the web itself when `web` is on; other
+ *  providers get the app's web_search tool instead. */
+const runModel = (
+  pid: string, model: string, system: string, history: ChatMessage[], specs: tools.ToolSpec[] | null,
+  run: openaiAdapter.RunTool, signal: AbortSignal | undefined, temperature: number | undefined, web = false,
+) =>
+  isClaude(pid)
+    ? anthropicAdapter.stream(pid, model, system, history, specs, run, signal, undefined, temperature, web)
+    : openaiAdapter.stream(pid, model, system, history, specs, run, signal, undefined, temperature);
 
 function friendly(e: unknown): string {
   const s = String((e as Error)?.message ?? e);
@@ -422,7 +444,9 @@ export async function* chatEvents(req: ChatRequest, cache: Cache, signal?: Abort
   }
 
   // Optional live web context for this turn (the 🌐 toggle), on top of tools.
-  if (req.web && mode === "chat") {
+  // Claude runs its own searches instead.
+  const web = !!req.web && mode === "chat";
+  if (web && !isClaude((await chain(req))[0][0])) {
     yield sse("status", { text: "Searching the web…" });
     const last = history.at(-1)!;
     const [text, n] = await data.webSearch(last.content.slice(0, 300));
@@ -540,10 +564,14 @@ export async function* chatEvents(req: ChatRequest, cache: Cache, signal?: Abort
         const size = providers.sizeOf(pid, model, ai.model_size);
         const system = await buildSystem(req, cache, attemptTools, size);
         noteIds(system);
-        const specs = attemptTools ? toolsFor(size, question) : null;
+        const specs = attemptTools ? toolsFor(size, question, web) : null;
         const temperature = size === "small" ? SMALL_TEMPERATURE : undefined;
         let draft = "";
-        for await (const ev of adapter(pid)(pid, model, system, history, specs, toolRunner(pid), signal, undefined, temperature)) {
+        for await (const ev of runModel(pid, model, system, history, specs, toolRunner(pid), signal, temperature, web)) {
+          if (ev.type === "web_text") {
+            toolTexts.push(`[web_search] ${ev.text}`);
+            continue;
+          }
           if (ev.type === "token" || ev.type === "reasoning" || ev.type === "tool_call") emitted = true;
           if (ev.type === "token") draft += ev.text;
           yield sse(ev.type, ev);
@@ -566,7 +594,7 @@ export async function* chatEvents(req: ChatRequest, cache: Cache, signal?: Abort
             const timeout = new Promise<void>((r) => setTimeout(r, STINTS_TIMEOUT_MS));
             await Promise.race([Promise.all(tied.map(async (p) => stints.set(p.pid, await nbaHistory.fetchStints(p.pid, cache).catch(() => ({}))))), timeout]);
             const opts: CheckOptions = { teams: mode !== "brief", seasons: askedSeasons, stints };
-            yield* factCheck(draft, `${facts}\n${extra}`, index, (h) => adapter(pid)(pid, model, system, h, null, toolRunner(pid), signal, undefined, temperature), history, opts, extra);
+            yield* factCheck(draft, `${facts}\n${extra}`, index, (h) => runModel(pid, model, system, h, null, toolRunner(pid), signal, temperature), history, opts, extra);
           }
         }
         if (mode === "chat") yield sse("digest", { text: digest(cardText, toolTexts) });

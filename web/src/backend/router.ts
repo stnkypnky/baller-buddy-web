@@ -282,6 +282,12 @@ route("PUT", "/ai/settings", async (_m, _q, body) => {
     patch.models = { ...ai.models, [pid]: body.model };
   }
   if (body?.reset_no_tools) patch.no_tools = [];
+  // a new balance restarts the spend count; null stops tracking
+  if (body?.claude_balance !== undefined) {
+    const b = body.claude_balance === null || body.claude_balance === "" ? null : Number(body.claude_balance);
+    if (b !== null && !(Number.isFinite(b) && b >= 0)) throw new ApiError(400, "balance must be a dollar amount");
+    patch.claude_credit = { balance: b === null ? null : Math.round(b * 100) / 100, spent: 0 };
+  }
   return settings.update("ai", patch);
 });
 

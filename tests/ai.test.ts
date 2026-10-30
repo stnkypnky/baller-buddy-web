@@ -4,6 +4,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as anthropicAdapter from "../web/src/backend/llm/anthropicAdapter";
+import * as credit from "../web/src/backend/llm/credit";
 import * as keys from "../web/src/backend/llm/keys";
 import * as openaiAdapter from "../web/src/backend/llm/openaiAdapter";
 import * as providers from "../web/src/backend/llm/providers";
@@ -45,6 +46,7 @@ describe("parsing", () => {
     expect(anthropicAdapter.supportsAdaptive("claude-sonnet-4-6")).toBe(true);
     expect(anthropicAdapter.supportsAdaptive("claude-fable-5-1")).toBe(true);
     expect(anthropicAdapter.supportsAdaptive("claude-haiku-4-5")).toBe(false);
+    expect(anthropicAdapter.supportsAdaptive("claude-haiku-5-5")).toBe(true);
     expect(anthropicAdapter.supportsAdaptive("claude-sonnet-4-5-20250929")).toBe(false);
     expect(anthropicAdapter.supportsAdaptive("claude-opus-4-20250514")).toBe(false);
     expect(anthropicAdapter.usesFallbacks("claude-opus-5-5")).toBe(true);
@@ -87,6 +89,23 @@ async function mockFetch(input: RequestInfo | URL, init?: RequestInit): Promise<
   if (url.endsWith("/models")) return Response.json({ object: "list", data: [{ id: "model-a" }, { id: "text-embedding-3" }] });
   if (url.includes("/v1/messages")) {
     calls.anthropic.push(body);
+    if (body.tools?.some((t: any) => t.type?.startsWith("web_search"))) {
+      const cite = { type: "web_search_result_location", url: "https://espn.com/trade", title: "ESPN", cited_text: "The Knicks traded for a guard.", encrypted_index: "x" };
+      return anStream([
+        msgStart(),
+        { type: "content_block_start", index: 0, content_block: { type: "server_tool_use", id: "srvtoolu_1", name: "web_search", input: {} } },
+        { type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: '{"query": "Knicks trade"}' } },
+        { type: "content_block_stop", index: 0 },
+        { type: "content_block_start", index: 1, content_block: { type: "web_search_tool_result", tool_use_id: "srvtoolu_1", content: [{ type: "web_search_result", url: "https://espn.com/trade", title: "ESPN", encrypted_content: "e", page_age: "1 day" }] } },
+        { type: "content_block_stop", index: 1 },
+        { type: "content_block_start", index: 2, content_block: { type: "text", text: "", citations: [] } },
+        { type: "content_block_delta", index: 2, delta: { type: "citations_delta", citation: cite } },
+        { type: "content_block_delta", index: 2, delta: { type: "text_delta", text: "The Knicks made a trade." } },
+        { type: "content_block_stop", index: 2 },
+        { type: "message_delta", delta: { stop_reason: "end_turn", stop_sequence: null }, usage: { output_tokens: 8, server_tool_use: { web_search_requests: 1 } } },
+        { type: "message_stop" },
+      ]);
+    }
     const hasResult = body.messages.some((m: any) => Array.isArray(m.content) && m.content.some((b: any) => b.type === "tool_result"));
     if (!hasResult) {
       return anStream([
@@ -158,6 +177,20 @@ describe("providers and router", () => {
     expect(results[0]).toMatchObject({ type: "tool_result", tool_use_id: "toolu_1" });
   });
 
+  it("lets Claude search the web when the switch is on", async () => {
+    await keys.setKey("anthropic", "sk-ant-test-key-123456");
+    const specs = tools.SPECS.filter((s) => s.name === "web_search" || s.name === "get_standings");
+    const evs = await collect(anthropicAdapter.stream("anthropic", "claude-haiku-5-5", "sys", [{ role: "user", content: "knicks?" }], specs, runToolStub, undefined, 6, undefined, true));
+    const sent = calls.anthropic[0].tools;
+    expect(sent.map((t: any) => t.name)).toEqual(["get_standings", "web_search"]); // the app's own web tool gives way
+    expect(sent[1]).toMatchObject({ type: "web_search_20250305", max_uses: 5 });
+    expect(anthropicAdapter.webSearchTool("claude-sonnet-5-5").type).toBe("web_search_20260209");
+    expect(evs.find((e) => e.type === "tool_call")).toMatchObject({ name: "web_search", args: { query: "Knicks trade" } });
+    expect(evs.find((e) => e.type === "tool_result")).toMatchObject({ ok: true, summary: expect.stringContaining("1 results") });
+    expect((evs.find((e) => e.type === "web_text") as any).text).toContain("The Knicks traded for a guard.");
+    expect(evs.filter((e) => e.type === "token").map((e: any) => e.text).join("")).toBe("The Knicks made a trade.\n\n**Sources:** [ESPN](https://espn.com/trade)");
+  });
+
   it("falls back to a data snapshot when a model rejects tools", async () => {
     // (this mock's canned "0-1" isn't in any data, so leave the fact-check out of it)
     await settings.update("ai", { provider: "custom", model: "no-tools-model", factcheck: false });
@@ -189,6 +222,24 @@ describe("providers and router", () => {
 
   it("lists only chat models", async () => {
     expect((await providers.listModels("custom", true)).map((m) => m.id)).toEqual(["model-a"]);
+  });
+});
+
+describe("claude credit", () => {
+  it("prices a response from its usage", () => {
+    expect(credit.costOf("claude-haiku-5-5", { input_tokens: 50_000, output_tokens: 100_000 })).toBeCloseTo(0.055);
+    expect(credit.costOf("claude-opus-5-5", { input_tokens: 10_000, cache_read_input_tokens: 100_000, output_tokens: 1000, server_tool_use: { web_search_requests: 2 } })).toBeCloseTo(0.04 + 0.04 + 0.02 + 0.02);
+    expect(credit.costOf("claude-haiku-5-5", { input_tokens: 200_000, output_tokens: 0 })).toBeCloseTo(0.1); // long prompts at 5x
+    expect(credit.costOf("gpt-x", { input_tokens: 1000 })).toBe(0);
+  });
+
+  it("counts spend down from the balance the user set", async () => {
+    await settings.update("ai", { claude_credit: { balance: 5, spent: 0 } });
+    await credit.recordSpend("claude-opus-5-5", { input_tokens: 0, output_tokens: 50_000 });
+    expect((await settings.get("ai")).claude_credit).toEqual({ balance: 5, spent: 1 });
+    await settings.update("ai", { claude_credit: { balance: null, spent: 0 } });
+    await credit.recordSpend("claude-opus-5-5", { input_tokens: 0, output_tokens: 50_000 });
+    expect((await settings.get("ai")).claude_credit.spent).toBe(0); // not tracking
   });
 });
 

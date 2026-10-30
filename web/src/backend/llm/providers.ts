@@ -106,6 +106,9 @@ const PARAMS = /(?:^|[^\d.])(\d{1,3}(?:\.\d)?)b(?:$|[^a-z])/i;
  *  `setting` is Settings' choice; "auto" goes by the provider and model name. */
 export function sizeOf(pid: string, model: string, setting: string = "auto"): "small" | "large" {
   if (setting === "small" || setting === "large") return setting;
+  // Haiku 5.x handles the full tool menu and rules; its name says light tier
+  const haiku = /^claude-haiku-(\d+)/.exec(model);
+  if (haiku && Number(haiku[1]) >= 5) return "large";
   const n = PARAMS.exec(model);
   if (n) return Number(n[1]) < 35 ? "small" : "large";
   if (SMALL_NAME.test(model)) return "small";
