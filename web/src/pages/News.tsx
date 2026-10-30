@@ -1,8 +1,11 @@
+import * as Popover from "@radix-ui/react-popover";
 import { useQuery } from "@tanstack/react-query";
 import {
   Ambulance,
   BarChart3,
   CalendarDays,
+  Check,
+  ChevronDown,
   ExternalLink,
   Globe,
   House,
@@ -16,7 +19,7 @@ import {
 import { motion } from "motion/react";
 import { useMemo, useState, type ReactNode } from "react";
 import { AiInline } from "../components/AiInline";
-import { Chip, cx, Empty, ErrorState, InjuryBadge, Item, Panel, SectionTitle, Skeleton, Stagger, TeamLogo } from "../components/ui";
+import { cx, Empty, ErrorState, InjuryBadge, Item, Panel, SectionTitle, Skeleton, Stagger, TeamLogo } from "../components/ui";
 import { api, openExternal } from "../lib/api";
 import { useSelection } from "../lib/queries";
 
@@ -117,7 +120,7 @@ export default function NewsPage() {
     return data[tab];
   }, [data, tab]);
 
-  const tabs: { key: Tab; label: string; icon: ReactNode; count?: number }[] = [
+  const tabs: TabOption[] = [
     { key: "team", label: sel.team?.nickname ?? "Team", icon: <TeamLogo espnAbbr={sel.team?.espn_abbr} size={16} />, count: data?.team.length },
     { key: "league", label: "League", icon: <Newspaper className="size-3.5" />, count: data?.league.length },
     { key: "rumors", label: "Trades & rumors", icon: <Repeat className="size-3.5" />, count: data?.rumors.length },
@@ -135,14 +138,7 @@ export default function NewsPage() {
             <h1 className="display text-4xl font-bold uppercase">News & links</h1>
           </div>
         </div>
-        <div className="flex flex-wrap gap-2">
-          {tabs.map((t) => (
-            <Chip key={t.key} active={tab === t.key} onClick={() => setTab(t.key)}>
-              {t.icon} {t.label}
-              {t.count != null && <span className="opacity-60 tabular">{t.count}</span>}
-            </Chip>
-          ))}
-        </div>
+        <TypePicker tabs={tabs} value={tab} onChange={setTab} />
       </Item>
 
       {error && <ErrorState error={error} onRetry={() => refetch()} />}
@@ -177,7 +173,8 @@ export default function NewsPage() {
             speakable
             hint={BRIEF_COPY[tab].hint(sel.team?.nickname ?? "team")}
           />
-          <TeamInjuries rows={data?.injuries.team} loading={isLoading} team={sel.team?.nickname} />
+          {/* The team's report belongs with its news; the Injuries board already leads with the team. */}
+          {tab === "team" && <TeamInjuries rows={data?.injuries.team} loading={isLoading} team={sel.team?.nickname} />}
           <div className="max-xl:hidden">
             <Links links={data?.links ?? []} />
           </div>
@@ -187,6 +184,53 @@ export default function NewsPage() {
         </Item>
       </div>
     </Stagger>
+  );
+}
+
+type TabOption = { key: Tab; label: string; icon: ReactNode; count?: number };
+
+function TypePicker({ tabs, value, onChange }: { tabs: TabOption[]; value: Tab; onChange: (t: Tab) => void }) {
+  const [open, setOpen] = useState(false);
+  const current = tabs.find((t) => t.key === value) ?? tabs[0];
+  return (
+    <Popover.Root open={open} onOpenChange={setOpen}>
+      <Popover.Trigger asChild>
+        <button className="group flex h-12 min-w-[200px] items-center gap-3 rounded-2xl border border-line bg-surface px-4 transition-colors hover:border-team-text/30 hover:bg-surface-2 max-sm:w-full">
+          <span className="text-team-text [&>svg]:size-4">{current.icon}</span>
+          <div className="flex-1 text-left leading-tight">
+            <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted">News type</div>
+            <div className="display text-[17px] font-bold tracking-wide">{current.label}</div>
+          </div>
+          <ChevronDown className="size-4 text-muted transition-transform group-data-[state=open]:rotate-180" />
+        </button>
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Content
+          align="end"
+          sideOffset={8}
+          className="z-[60] w-[var(--radix-popover-trigger-width)] min-w-56 rounded-2xl border border-line bg-[#0d1017]/95 p-1.5 shadow-2xl backdrop-blur-xl"
+        >
+          {tabs.map((t) => (
+            <button
+              key={t.key}
+              onClick={() => {
+                onChange(t.key);
+                setOpen(false);
+              }}
+              className={cx(
+                "flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm hover:bg-white/[0.06]",
+                t.key === value && "text-team-text",
+              )}
+            >
+              <span className="[&>svg]:size-4">{t.icon}</span>
+              <span className="flex-1">{t.label}</span>
+              {t.count != null && <span className="text-xs text-muted tabular">{t.count}</span>}
+              {t.key === value && <Check className="size-3.5" />}
+            </button>
+          ))}
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
   );
 }
 

@@ -77,18 +77,19 @@ export default function OverviewPage() {
 
       <div className="grid grid-cols-12 gap-5">
         <Item className="col-span-12 xl:col-span-8">
-          <Panel className="p-5">
+          <Panel className="@container p-5">
             <SectionTitle right={<span className="text-xs text-muted">{dash?.gp ? `${dash.gp} game${dash.gp === 1 ? "" : "s"}` : ""}</span>}>
               {seasonTypeLabel[seasonType]} averages
             </SectionTitle>
             {isLoading ? (
-              <div className="grid grid-cols-5 gap-3 max-sm:grid-cols-2">
+              <div className="grid grid-cols-5 gap-3 @max-[700px]:grid-cols-2">
                 {Array.from({ length: 10 }, (_, i) => (
                   <Skeleton key={i} className="h-[92px]" />
                 ))}
               </div>
             ) : dash && "pts" in dash ? (
-              <div className="grid grid-cols-5 gap-3 max-sm:grid-cols-2">
+              // Five across needs room; narrower (tablet upright with the menu open, phones) goes two across.
+              <div className="grid grid-cols-5 gap-3 @max-[700px]:grid-cols-2">
                 {KPIS.map((k, i) => (
                   <Kpi key={k.key} label={k.label} value={dash[k.key] as number} fmt={k.fmt} rank={ranks[k.key]} index={i} />
                 ))}
@@ -150,7 +151,9 @@ function Hero({
   const hot = st?.streak.startsWith("W");
   const phone = useIsPhone();
   return (
-    <Panel className="relative overflow-hidden">
+    // Sized by its own width, not the screen's: a tablet in portrait with the
+    // sidebar open is too narrow for one row, so the record drops below the name.
+    <Panel className="@container relative overflow-hidden">
       <div className="pointer-events-none absolute inset-0 bg-gradient-to-r from-team/35 via-team/10 to-transparent" />
       <motion.div
         key={team?.id}
@@ -162,7 +165,7 @@ function Hero({
         <TeamLogo espnAbbr={team?.espn_abbr} size={380} />
       </motion.div>
 
-      <div className="relative flex items-center gap-7 p-7 max-sm:flex-wrap max-sm:gap-4 max-sm:p-4">
+      <div className="relative flex items-center gap-7 p-7 @max-3xl:flex-wrap max-sm:gap-4 max-sm:p-4">
         <motion.div
           key={`logo-${team?.id}`}
           initial={{ opacity: 0, y: 12, scale: 0.85 }}
@@ -175,7 +178,7 @@ function Hero({
 
         <div className="min-w-0 flex-1">
           <div className="eyebrow text-team-text">{team?.city} · {season}</div>
-          <h1 className="display mt-1 truncate text-[64px] leading-[0.9] font-bold uppercase max-sm:text-[40px]">{team?.nickname}</h1>
+          <h1 className="display mt-1 text-[64px] leading-[0.9] font-bold break-words uppercase max-sm:text-[40px]">{team?.nickname}</h1>
           <div className="mt-4 flex flex-wrap gap-2 max-sm:mt-3 max-sm:gap-1.5">
             {loading || !st ? (
               <Skeleton className="h-7 w-72" />
@@ -196,7 +199,7 @@ function Hero({
           </div>
         </div>
 
-        <div className="flex flex-col items-end gap-4 max-sm:w-full max-sm:flex-col-reverse max-sm:items-stretch">
+        <div className="flex flex-col items-end gap-4 @max-3xl:w-full @max-3xl:flex-col-reverse @max-3xl:items-stretch">
           <Segmented
             size="sm"
             value={seasonType}
@@ -207,7 +210,7 @@ function Hero({
               { value: "full", label: "Full Year" },
             ]}
           />
-          <div className="text-right max-sm:flex max-sm:items-end max-sm:justify-between max-sm:gap-3 max-sm:text-left">
+          <div className="text-right @max-3xl:flex @max-3xl:items-end @max-3xl:justify-between @max-3xl:gap-3 @max-3xl:text-left">
             <div className="display text-[84px] leading-none font-bold tabular whitespace-nowrap max-sm:text-[56px]">
               {st ? (
                 <>
