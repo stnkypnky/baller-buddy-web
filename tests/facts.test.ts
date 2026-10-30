@@ -143,6 +143,14 @@ describe("model size", () => {
     expect(router.toolsFor("large", "anything").length).toBe(19);
   });
 
+  it("tells news questions from stats and opinion questions", () => {
+    expect(router.NEWS.test("what do you think about the Jalen Brown and Jason Tatum drama in the news?")).toBe(true);
+    expect(router.NEWS.test("any trade rumors around the Knicks?")).toBe(true);
+    expect(router.NEWS.test("was Draymond suspended?")).toBe(true);
+    expect(router.NEWS.test("thoughts on Paul George as a Celtic")).toBe(false);
+    expect(router.NEWS.test("how many points did Tatum score last night?")).toBe(false);
+  });
+
   it("offers web search only when the user turns it on", () => {
     const has = (size: "small" | "large", web: boolean) => router.toolsFor(size, "any trade news?", web).some((t) => t.name === "web_search");
     expect(has("large", false)).toBe(false);

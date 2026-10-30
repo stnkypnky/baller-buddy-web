@@ -71,14 +71,23 @@ const anStream = (events: any[]) => sseResponse(events.map((e) => `event: ${e.ty
 const msgStart = () => ({ type: "message_start", message: { id: "msg_1", type: "message", role: "assistant", model: "claude-haiku-4-5", content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 10, output_tokens: 1 } } });
 
 async function mockFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-  const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+  const raw = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+  // cloud providers without CORS go through the site's relay
+  const relayed = /ai-relay\?url=(.*)$/.exec(raw);
+  const url = relayed ? decodeURIComponent(relayed[1]) : raw;
   const bodyText = init?.body ? String(init.body) : input instanceof Request ? await input.text() : "";
   const body = bodyText ? JSON.parse(bodyText) : null;
   if (url.endsWith("/chat/completions")) {
     calls.openai.push(body);
     if (body.model === "no-tools-model" && "tools" in body) return Response.json({ error: { message: "this model does not support tools" } }, { status: 400 });
     if (body.messages.some((m: any) => m.role === "tool") || !("tools" in body)) {
-      return oaStream([oaChunk({ role: "assistant", content: "<think>checking</think>" }), oaChunk({ content: "Celtics are 0-1." }), oaChunk({}, "stop")]);
+      const usageChunk = { id: "x", object: "chat.completion.chunk", created: 0, model: body.model, choices: [], usage: { prompt_tokens: 100, completion_tokens: 20 } };
+      return oaStream([
+        oaChunk({ role: "assistant", content: "<think>checking</think>" }),
+        oaChunk({ content: "Celtics are 0-1." }),
+        oaChunk({}, "stop"),
+        ...(body.stream_options?.include_usage ? [usageChunk] : []),
+      ]);
     }
     return oaStream([
       oaChunk({ role: "assistant", content: null, tool_calls: [{ index: 0, id: "call_1", type: "function", function: { name: "get_standings", arguments: '{"confer' } }] }),
@@ -163,6 +172,17 @@ describe("providers and router", () => {
     expect(second.at(-1)).toEqual({ role: "tool", tool_call_id: "call_1", content: (await runToolStub("get_standings", { conference: "East" }))[0] });
   });
 
+  it("asks OpenAI for usage and records it", async () => {
+    await keys.setKey("openai", "sk-openai-test-123456");
+    await usage.resetUsage("openai");
+    await collect(openaiAdapter.stream("openai", "gpt-5", "sys", [{ role: "user", content: "hi" }], null, runToolStub));
+    expect(calls.openai.at(-1).stream_options).toEqual({ include_usage: true });
+    expect((await usage.getUsage()).openai.models["gpt-5"]).toMatchObject({ requests: 1, input: 100, output: 20 });
+    // other OpenAI-style servers aren't asked (some reject the field)
+    await collect(openaiAdapter.stream("custom", "model-a", "sys", [{ role: "user", content: "hi" }], null, runToolStub));
+    expect("stream_options" in calls.openai.at(-1)).toBe(false);
+  });
+
   it("runs the Anthropic tool loop through the SDK", async () => {
     await keys.setKey("anthropic", "sk-ant-test-key-123456");
     const evs = await collect(anthropicAdapter.stream("anthropic", "claude-haiku-4-5", "sys", [{ role: "user", content: "west?" }], [{ name: "get_standings", description: "d", parameters: { type: "object", properties: { conference: { type: "string" } } } }], runToolStub));
@@ -228,23 +248,35 @@ describe("providers and router", () => {
   });
 });
 
-describe("claude usage", () => {
-  it("prices a response from its usage", () => {
+describe("usage tracking", () => {
+  it("prices a Claude response from its usage", () => {
     expect(usage.costOf("claude-haiku-5-5", { input_tokens: 50_000, output_tokens: 100_000 })).toBeCloseTo(0.055);
     expect(usage.costOf("claude-opus-5-5", { input_tokens: 10_000, cache_read_input_tokens: 100_000, output_tokens: 1000, server_tool_use: { web_search_requests: 2 } })).toBeCloseTo(0.04 + 0.04 + 0.02 + 0.02);
     expect(usage.costOf("claude-haiku-5-5", { input_tokens: 200_000, output_tokens: 0 })).toBeCloseTo(0.1); // long prompts at 5x
     expect(usage.costOf("gpt-x", { input_tokens: 1000 })).toBe(0);
   });
 
-  it("adds up spend until reset", async () => {
-    await usage.resetSpend();
-    await usage.recordSpend("claude-opus-5-5", { input_tokens: 0, output_tokens: 50_000 });
-    await usage.recordSpend("claude-opus-5-5", { input_tokens: 0, output_tokens: 25_000 });
-    const u = (await settings.get("ai")).claude_usage;
-    expect(u.spent).toBeCloseTo(1.5);
-    expect(u.since).not.toBe("");
-    await usage.resetSpend();
-    expect((await settings.get("ai")).claude_usage.spent).toBe(0);
+  it("prices an OpenAI response, cached input at its own rate", () => {
+    // gpt-5: 10K fresh x $1.25 + 90K cached x $0.125 + 2K out x $10
+    const r = usage.openaiRow("gpt-5", { prompt_tokens: 100_000, completion_tokens: 2000, prompt_tokens_details: { cached_tokens: 90_000 }, completion_tokens_details: { reasoning_tokens: 1500 } });
+    expect(r).toMatchObject({ input: 10_000, cached: 90_000, output: 2000, reasoning: 1500, priced: true });
+    expect(r.cost).toBeCloseTo(0.0125 + 0.01125 + 0.02);
+    expect(usage.openaiRow("openai/gpt-5-mini", { prompt_tokens: 1_000_000, completion_tokens: 0 }).cost).toBeCloseTo(0.25);
+    // a model with no settled price counts tokens, not dollars
+    expect(usage.openaiRow("gpt-9-turbo", { prompt_tokens: 500, completion_tokens: 50 })).toMatchObject({ input: 500, cost: 0, unpriced: 1 });
+  });
+
+  it("adds up per provider and model until reset", async () => {
+    await usage.resetUsage("anthropic");
+    await usage.recordClaude("claude-opus-5-5", { input_tokens: 0, output_tokens: 50_000 });
+    await usage.recordClaude("claude-opus-5-5", { input_tokens: 0, output_tokens: 25_000 });
+    await usage.recordClaude("claude-haiku-5-5", { input_tokens: 1000, output_tokens: 0 });
+    const p = (await usage.getUsage()).anthropic;
+    expect(p.models["claude-opus-5-5"]).toMatchObject({ requests: 2, output: 75_000 });
+    expect(usage.totals(p).cost).toBeCloseTo(1.5 + 0.0001);
+    expect(p.since).not.toBe("");
+    await usage.resetUsage("anthropic");
+    expect((await usage.getUsage()).anthropic.models).toEqual({});
   });
 });
 

@@ -37,7 +37,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import { useNavigate } from "react-router-dom";
 import remarkGfm from "remark-gfm";
-import { reportTurn, TOOL_LABELS, type AiSettings, type FactTable, type ModelInfo, type ProviderInfo, type ToolChip, type Turn } from "../lib/ai";
+import { reportTurn, TOOL_LABELS, type AiSettings, type FactTable, type ModelInfo, type ProviderInfo, type ToolChip, type Turn, type UsageStore } from "../lib/ai";
 import { api, openExternal, put } from "../lib/api";
 import { useApp } from "../lib/store";
 import { BallMark } from "./shell";
@@ -360,6 +360,10 @@ export function useProviders() {
     queryFn: () => api<{ providers: ProviderInfo[]; settings: AiSettings }>("/ai/providers"),
     staleTime: 30_000,
   });
+}
+
+export function useUsage() {
+  return useQuery({ queryKey: ["ai-usage"], queryFn: () => api<UsageStore>("/ai/usage"), staleTime: 10_000 });
 }
 
 export function useModels(pid?: string, enabled = true) {

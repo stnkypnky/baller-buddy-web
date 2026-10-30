@@ -4,6 +4,7 @@
  *  the chat-completions SSE format over fetch. */
 
 import { credentials, HttpStatusError, providerFetch } from "./providers";
+import { recordOpenAI } from "./usage";
 import type { ToolSpec } from "./tools";
 
 export class ToolsUnsupported extends Error {}
@@ -192,6 +193,8 @@ export async function* stream(
 
   for (let rnd = 0; rnd <= maxRounds; rnd++) {
     const body: Record<string, unknown> = { model, messages, stream: true };
+    // OpenAI reports a streamed response's token usage only when asked
+    if (pid === "openai") body.stream_options = { include_usage: true };
     if (fnTools.length && rnd < maxRounds) body.tools = fnTools;
     if (temp !== undefined) body.temperature = temp;
     const post = () =>
@@ -226,6 +229,8 @@ export async function* stream(
         continue;
       }
       if (chunk?.error) throw new Error(String(chunk.error.message ?? JSON.stringify(chunk.error)));
+      // the last chunk (no choices) carries the usage
+      if (pid === "openai" && chunk?.usage) void recordOpenAI(chunk.model || model, chunk.usage);
       yield* acc.feed(chunk);
     }
     yield* acc.flush();

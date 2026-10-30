@@ -20,9 +20,9 @@ import {
 import { motion } from "motion/react";
 import { useState } from "react";
 import { toast } from "sonner";
-import { openKeyPage, useModels, useProviders } from "../components/AiParts";
+import { openKeyPage, useModels, useProviders, useUsage } from "../components/AiParts";
 import { Button, Chip, cx, Item, Panel, SectionTitle, Skeleton, Spinner, Stagger, TeamLogo } from "../components/ui";
-import { claudeUsed, exportReports, useReports, type ModelInfo, type ProviderInfo } from "../lib/ai";
+import { exportReports, TRACKED_USAGE, usedLabel, useReports, type ModelInfo, type ProviderInfo } from "../lib/ai";
 import * as music from "../backend/music";
 import { api, del, post, put } from "../lib/api";
 import { reloadLibrary, stop as stopMusic } from "../lib/player";
@@ -228,7 +228,7 @@ function ProviderCard({ p, active, running }: { p: ProviderInfo; active: boolean
             </Button>
           </div>
         )}
-        {p.kind === "anthropic" && p.configured && <ClaudeUsage />}
+        {TRACKED_USAGE.includes(p.id) && p.configured && <ProviderUsage pid={p.id} name={p.name} />}
       </div>
 
       {result && (
@@ -260,30 +260,80 @@ function ProviderCard({ p, active, running }: { p: ProviderInfo; active: boolean
   );
 }
 
-/** This app's estimated Claude spend, counted from each answer's token usage,
- *  with a reset back to $0.00. */
-function ClaudeUsage() {
-  const { data } = useProviders();
+const tok = (n: number) => (n >= 1e6 ? `${(n / 1e6).toFixed(2)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}K` : String(n));
+const usd = (n: number) => (n > 0 && n < 0.01 ? `$${n.toFixed(4)}` : `$${n.toFixed(2)}`);
+
+/** This app's estimated spend with a provider, counted from each answer's
+ *  token usage: the total with a reset, and a per-model breakdown. */
+function ProviderUsage({ pid, name }: { pid: string; name: string }) {
+  const { data } = useUsage();
   const qc = useQueryClient();
-  const since = data?.settings.claude_usage?.since;
+  const [open, setOpen] = useState(false);
+  const p = data?.[pid];
+  const models = Object.entries(p?.models ?? {}).sort((a, b) => b[1].cost - a[1].cost || b[1].requests - a[1].requests);
+  const unpriced = models.filter(([, m]) => m.unpriced).map(([id]) => id);
 
   async function reset() {
-    await put("/ai/settings", { reset_claude_usage: true });
-    qc.invalidateQueries({ queryKey: ["ai-providers"] });
-    toast("Claude usage reset to $0.00");
+    await post(`/ai/usage/${pid}/reset`);
+    qc.invalidateQueries({ queryKey: ["ai-usage"] });
+    toast(`${name} usage reset to $0.00`);
   }
 
   return (
-    <div className="flex h-10 items-center gap-2 rounded-xl border border-line bg-black/30 px-3 text-[13px]">
-      <span className="font-semibold text-win" title={`$${(data?.settings.claude_usage?.spent ?? 0).toFixed(4)}`}>
-        {claudeUsed(data?.settings)}
-      </span>
-      <span className="min-w-0 truncate text-[11px] text-faint">
-        {since ? `since ${new Date(since).toLocaleDateString(undefined, { month: "short", day: "numeric" })}` : "by this app"} · estimate
-      </span>
-      <Button variant="ghost" size="sm" onClick={reset} className="ml-auto">
-        Reset
-      </Button>
+    <div className="rounded-xl border border-line bg-black/30 text-[13px]">
+      <div className="flex h-10 items-center gap-2 px-3">
+        <span className="font-semibold text-win">{usedLabel(data, pid)}</span>
+        <span className="min-w-0 truncate text-[11px] text-faint">
+          {p?.since ? `since ${new Date(p.since).toLocaleDateString(undefined, { month: "short", day: "numeric" })}` : "by this app"} · estimate
+        </span>
+        {models.length > 0 && (
+          <Button variant="ghost" size="sm" onClick={() => setOpen(!open)} className="ml-auto">
+            {open ? "Hide" : "Details"}
+          </Button>
+        )}
+        <Button variant="ghost" size="sm" onClick={reset} className={models.length ? "" : "ml-auto"}>
+          Reset
+        </Button>
+      </div>
+      {open && (
+        <div className="border-t border-line px-3 pt-2 pb-3">
+          <div className="overflow-x-auto">
+            <table className="w-full text-[11px] tabular">
+              <thead className="text-faint">
+                <tr className="text-right [&>th]:pb-1 [&>th]:font-medium">
+                  <th className="text-left">Model</th>
+                  <th>Asks</th>
+                  <th title="Input tokens at full price">In</th>
+                  <th title="Input tokens read from the prompt cache (about a tenth of the price)">Cached</th>
+                  <th title={pid === "openai" ? "Output tokens; reasoning tokens in brackets" : "Output tokens, reasoning included"}>Out</th>
+                  {pid === "anthropic" && <th>Searches</th>}
+                  <th>Cost</th>
+                </tr>
+              </thead>
+              <tbody>
+                {models.map(([id, m]) => (
+                  <tr key={id} className="text-right text-muted [&>td]:py-0.5">
+                    <td className="max-w-[140px] truncate text-left text-fg/90" title={id}>{id}</td>
+                    <td>{m.requests}</td>
+                    <td>{tok(m.input + m.cache_write)}</td>
+                    <td>{tok(m.cached)}</td>
+                    <td>
+                      {tok(m.output)}
+                      {m.reasoning > 0 && <span className="text-faint"> ({tok(m.reasoning)})</span>}
+                    </td>
+                    {pid === "anthropic" && <td>{m.searches}</td>}
+                    <td className="text-fg/90">{m.unpriced ? "?" : usd(m.cost)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="mt-2 text-[10px] text-faint">
+            "Asks" counts each request to {name}; one question can take several (tools, web searches, fact-check rewrites).
+            {unpriced.length > 0 && ` No published price on file for ${unpriced.join(", ")}: its tokens are counted but not its cost.`}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

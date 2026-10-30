@@ -3,7 +3,7 @@
  *  allows direct browser calls, and the key is the user's own. */
 
 import Anthropic from "@anthropic-ai/sdk";
-import { recordSpend } from "./usage";
+import { recordClaude } from "./usage";
 import { getKey } from "./keys";
 import type { AdapterEvent, ChatMessage, RunTool } from "./openaiAdapter";
 import { validateArgs, type ToolSpec } from "./tools";
@@ -39,6 +39,14 @@ export function webSearchTool(model: string) {
   return { type: filtering ? "web_search_20260209" : "web_search_20250305", name: "web_search", max_uses: WEB_MAX_USES };
 }
 
+function safeJson(s: string): any {
+  try {
+    return JSON.parse(s);
+  } catch {
+    return {};
+  }
+}
+
 /** Chip events for a response's web searches, the text they gave (for the
  *  fact-check), and the pages the answer cited. */
 function webBlocks(content: any[]) {
@@ -48,7 +56,8 @@ function webBlocks(content: any[]) {
   const queries = new Map<string, string>();
   for (const b of content) {
     if (b.type === "server_tool_use" && b.name === "web_search") {
-      const query = String(b.input?.query ?? "");
+      const input = typeof b.input === "string" ? safeJson(b.input) : b.input;
+      const query = String(input?.query ?? "").trim();
       queries.set(b.id, query);
       events.push({ type: "tool_call", id: b.id, name: "web_search", args: { query } });
     } else if (b.type === "web_search_tool_result") {
@@ -56,7 +65,8 @@ function webBlocks(content: any[]) {
       // a list on success, one error object on failure (the request itself still succeeds)
       if (Array.isArray(b.content)) {
         for (const r of b.content) found.push(`- ${r.title} (${r.url})${r.page_age ? ` · ${r.page_age}` : ""}`);
-        events.push({ type: "tool_result", id: b.tool_use_id, name: "web_search", summary: `Searched the web: “${q.slice(0, 60)}” · ${b.content.length} results`, ok: true });
+        const what = q ? `Searched the web: “${q.slice(0, 60)}”` : "Searched the web";
+        events.push({ type: "tool_result", id: b.tool_use_id, name: "web_search", summary: `${what} · ${b.content.length} results`, ok: true });
       } else {
         const code = b.content?.error_code ?? "error";
         events.push({ type: "tool_result", id: b.tool_use_id, name: "web_search", summary: `Web search failed (${code})`, ok: false });
@@ -143,7 +153,7 @@ export async function* stream(
       if (isJsonError(e) && ++jsonRetries <= 2) continue;
       throw e;
     }
-    void recordSpend(final.model ?? model, final.usage ?? {});
+    void recordClaude(final.model ?? model, final.usage ?? {});
 
     if (web) {
       const w = webBlocks(final.content);

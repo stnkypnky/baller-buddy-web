@@ -3,10 +3,10 @@ import { useQueryClient } from "@tanstack/react-query";
 import { ArrowUp, Eraser, Globe, Square } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AssistantBody, ModelPicker, useProviders } from "../components/AiParts";
+import { AssistantBody, ModelPicker, useProviders, useUsage } from "../components/AiParts";
 import { BallMark } from "../components/shell";
 import { cx, IconButton, TeamLogo, Tip } from "../components/ui";
-import { claudeUsed, sendChat, stopChat, useChatStore } from "../lib/ai";
+import { sendChat, usedLabel, stopChat, useChatStore } from "../lib/ai";
 import { useIsPhone } from "../lib/phone";
 import { useSelection } from "../lib/queries";
 
@@ -35,10 +35,11 @@ export default function AIPage() {
     if (providers.data) setWeb(providers.data.settings.web_default);
   }, [providers.data?.settings.web_default]);
 
-  // Claude spend, only while Claude answers; refreshed after each answer.
-  const credit = providers.data?.providers.find((p) => p.id === providers.data.settings.provider)?.kind === "anthropic" ? claudeUsed(providers.data.settings) : "";
+  // Spend for the active provider (Claude, OpenAI); refreshed after each answer.
+  const usage = useUsage();
+  const credit = usedLabel(usage.data, providers.data?.settings.provider);
   useEffect(() => {
-    if (!streaming) qc.invalidateQueries({ queryKey: ["ai-providers"] });
+    if (!streaming) qc.invalidateQueries({ queryKey: ["ai-usage"] });
   }, [streaming, qc]);
 
   // Keep the newest tokens in view while streaming.

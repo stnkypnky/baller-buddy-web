@@ -310,12 +310,30 @@ export interface AiSettings {
   web_default: boolean;
   factcheck: boolean;
   model_size?: "auto" | "small" | "large";
-  claude_usage?: { spent: number; since: string };
 }
 
-/** "$#.## used": this app's estimated Claude spend since the last reset. */
-export function claudeUsed(s?: AiSettings): string {
-  return `$${(s?.claude_usage?.spent ?? 0).toFixed(2)} used`;
+/** Estimated spend per provider and model (backend/llm/usage.ts). */
+export interface ModelUsage {
+  requests: number;
+  input: number;
+  cached: number;
+  cache_write: number;
+  output: number;
+  reasoning: number;
+  searches: number;
+  cost: number;
+  unpriced: number;
+}
+export type UsageStore = Record<string, { since: string; models: Record<string, ModelUsage> }>;
+
+/** Providers whose spend the app tracks. */
+export const TRACKED_USAGE = ["anthropic", "openai"];
+
+/** "$#.## used" for a tracked provider since its last reset; "" for others. */
+export function usedLabel(usage: UsageStore | undefined, pid: string | undefined): string {
+  if (!pid || !TRACKED_USAGE.includes(pid)) return "";
+  const cost = Object.values(usage?.[pid]?.models ?? {}).reduce((s, m) => s + m.cost, 0);
+  return `$${cost.toFixed(2)} used`;
 }
 
 export interface ModelInfo {

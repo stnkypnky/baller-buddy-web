@@ -283,8 +283,14 @@ route("PUT", "/ai/settings", async (_m, _q, body) => {
     patch.models = { ...ai.models, [pid]: body.model };
   }
   if (body?.reset_no_tools) patch.no_tools = [];
-  if (body?.reset_claude_usage) await usage.resetSpend();
   return settings.update("ai", patch);
+});
+// estimated spend per provider and model since each provider's last reset
+route("GET", "/ai/usage", () => usage.getUsage());
+route("POST", "/ai/usage/{pid}/reset", async (m) => {
+  const pid = provider(m.groups!.pid);
+  await usage.resetUsage(pid);
+  return usage.getUsage();
 });
 
 // ── dispatch ─────────────────────────────────────────────────────────────────

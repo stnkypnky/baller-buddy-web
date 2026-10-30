@@ -54,6 +54,21 @@ const SCOPE_RULE =
   "general knowledge, chit-chat, homework, writing tasks), call no tools and reply with exactly: " +
   `"${OFF_TOPIC_REPLY}"`;
 
+/** News and off-court questions: the story is in the reporting, not the box
+ *  score. (Plain opinion questions, "thoughts on George as a Celtic", aren't:
+ *  their team ties still get checked.) */
+export const NEWS =
+  /\b(drama|feud|beef|rift|tension|spat|controvers\w*|scandal|news|headlines?|rumou?rs?|report(s|ed|edly)?|sources say|quoted?|quotes|interview|comments he made|trade (talk|request|demand)|wants? out|holdout|fined|suspen\w+|ejected|fight)\b/i;
+
+const NEWS_WEB =
+  "\n\n(This is a news/opinion question. Search the web first (search for the story itself, e.g. the players' names plus the topic) " +
+  "and answer from the reporting: what happened, who said what, when, and which outlet reported it. Separate what's confirmed from " +
+  "rumor or speculation. Then give your take. Bring in stats only where they bear on the story, and don't list box scores. If the " +
+  "user misspells a name, use the right one. If an article contradicts the roster data, the roster data is newer: say the report may be dated.)";
+const NEWS_NO_WEB =
+  "\n\n(This is a news/opinion question. Check get_news for it; if the app's news doesn't cover it, say so plainly in one line and suggest " +
+  "turning on the web switch (🌐). Don't fill the answer with box scores.)";
+
 /** Appended to the model's copy of the user's latest message (never shown). */
 const SCOPE_REMINDER = `\n\n(Reminder: answer only if this is about the NBA; otherwise reply exactly "${OFF_TOPIC_REPLY}")`;
 
@@ -467,11 +482,13 @@ export async function* chatEvents(req: ChatRequest, cache: Cache, signal?: Abort
   /** Past seasons the question (or the one it follows up) is about. */
   let askedSeasons: string[] = [];
   let question = "";
+  let newsQ = false;
   const ai = await settings.get("ai");
   if (mode === "chat") {
     const users = history.filter((m) => m.role === "user");
     question = req.messages?.filter((m) => m.role === "user").at(-1)?.content ?? users.at(-1)!.content;
     const previous = users.at(-2)?.content ?? "";
+    newsQ = NEWS.test(question);
     askedSeasons = findSeasons(question).length ? findSeasons(question) : findSeasons(previous);
     // a local or small model gets less data at once: the facts that matter, not everything
     const [firstPid, firstModel] = (await chain(req))[0];
@@ -484,7 +501,8 @@ export async function* chatEvents(req: ChatRequest, cache: Cache, signal?: Abort
       const timeout = new Promise<null>((r) => setTimeout(() => r(null), GROUND_TIMEOUT_MS));
       const [g, tables] = await Promise.all([
         Promise.race([ground(question, { followed: req.team_id, cache, budget: local ? GROUND_BUDGET.local : GROUND_BUDGET.cloud, previous, index: idx }), timeout]),
-        factsFor(question, { followed: req.team_id, cache, index: idx }).catch(() => [] as FactTable[]),
+        // a news question's answer is the reporting: stat tables would crowd it out
+        newsQ ? ([] as FactTable[]) : factsFor(question, { followed: req.team_id, cache, index: idx }).catch(() => [] as FactTable[]),
       ]);
       const earlier = recheck ? "" : earlierData(req.data_digests, local ? EARLIER_BUDGET.local : EARLIER_BUDGET.cloud);
       // Verified tables go to the user as they are; the model gives its take on them.
@@ -506,7 +524,7 @@ export async function* chatEvents(req: ChatRequest, cache: Cache, signal?: Abort
   // Small models drift off topic more easily: remind them on the turn itself.
   if (mode === "chat") {
     const last = history.at(-1)!;
-    history[history.length - 1] = { ...last, content: last.content + SCOPE_REMINDER };
+    history[history.length - 1] = { ...last, content: last.content + (newsQ ? (web ? NEWS_WEB : NEWS_NO_WEB) : "") + SCOPE_REMINDER };
   }
 
   // Game ids the model has actually seen: the user's words, today's slate,
@@ -593,7 +611,8 @@ export async function* chatEvents(req: ChatRequest, cache: Cache, signal?: Abort
             const stints = new Map<number, Stints>();
             const timeout = new Promise<void>((r) => setTimeout(r, STINTS_TIMEOUT_MS));
             await Promise.race([Promise.all(tied.map(async (p) => stints.set(p.pid, await nbaHistory.fetchStints(p.pid, cache).catch(() => ({}))))), timeout]);
-            const opts: CheckOptions = { teams: mode !== "brief", seasons: askedSeasons, stints };
+            // news reporting (like a brief's headlines) can be newer than the rosters: don't check team ties
+            const opts: CheckOptions = { teams: mode !== "brief" && !newsQ, seasons: askedSeasons, stints };
             yield* factCheck(draft, `${facts}\n${extra}`, index, (h) => runModel(pid, model, system, h, null, toolRunner(pid), signal, temperature), history, opts, extra);
           }
         }
