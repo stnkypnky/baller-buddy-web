@@ -101,10 +101,15 @@ export async function* stream(
       input_schema: { ...s.parameters, type: "object" as const },
       eager_input_streaming: true,
     }));
+  // The tool list is the same every turn: cache up to its end. (The system
+  // prompt isn't marked: it carries live scores.)
+  if (aTools.length) aTools[aTools.length - 1].cache_control = { type: "ephemeral" };
   if (web) aTools.push(webSearchTool(model));
   const sources = new Map<string, string>();
 
-  const base: Record<string, unknown> = { model, max_tokens: 32000, system };
+  // Automatic caching for the conversation: a turn's later rounds (after tool
+  // calls, web searches) re-read everything before them at a tenth of the price.
+  const base: Record<string, unknown> = { model, max_tokens: 32000, system, cache_control: { type: "ephemeral" } };
   if (supportsAdaptive(model)) base.thinking = { type: "adaptive", display: "summarized" };
   const beta = usesFallbacks(model);
   if (beta) Object.assign(base, { betas: [FALLBACK_BETA], fallbacks: "default" });

@@ -171,6 +171,8 @@ describe("providers and router", () => {
     expect(evs.filter((e) => e.type === "token").map((e: any) => e.text).join("")).toBe("Thunder lead the West.");
     const [first, second] = calls.anthropic;
     expect(first.tools[0].eager_input_streaming).toBe(true);
+    expect(first.tools.at(-1).cache_control).toEqual({ type: "ephemeral" }); // tools cached across turns
+    expect(first.cache_control).toEqual({ type: "ephemeral" }); // and the conversation within one
     expect("thinking" in first).toBe(false); // haiku: no adaptive thinking
     const results = second.messages.at(-1).content;
     expect(results.length).toBe(1);
@@ -184,6 +186,7 @@ describe("providers and router", () => {
     const sent = calls.anthropic[0].tools;
     expect(sent.map((t: any) => t.name)).toEqual(["get_standings", "web_search"]); // the app's own web tool gives way
     expect(sent[1]).toMatchObject({ type: "web_search_20250305", max_uses: 5 });
+    expect(sent[0].cache_control).toEqual({ type: "ephemeral" }); // the marker stays on the last of the app's tools
     expect(anthropicAdapter.webSearchTool("claude-sonnet-5-5").type).toBe("web_search_20260209");
     expect(evs.find((e) => e.type === "tool_call")).toMatchObject({ name: "web_search", args: { query: "Knicks trade" } });
     expect(evs.find((e) => e.type === "tool_result")).toMatchObject({ ok: true, summary: expect.stringContaining("1 results") });
