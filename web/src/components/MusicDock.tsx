@@ -291,7 +291,11 @@ function Playlist() {
       .filter(({ t }) => !n || `${t.title} ${t.artist} ${t.album}`.toLowerCase().includes(n));
   }, [tracks, q]);
   const activeRef = useRef<HTMLButtonElement>(null);
-  useEffect(() => activeRef.current?.scrollIntoView({ block: "center" }), []);
+  // Braces matter: newer Chrome's scrollIntoView returns a Promise, which React
+  // would take for a clean-up function and crash calling when the list closes.
+  useEffect(() => {
+    activeRef.current?.scrollIntoView({ block: "center" });
+  }, []);
   const total = tracks.reduce((s, t) => s + t.duration, 0);
 
   return (
