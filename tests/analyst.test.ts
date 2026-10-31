@@ -27,11 +27,17 @@ const espnFinal = {
   competitions: [{ competitors }],
 };
 const scoreboard = (u: string) => ({ day: { date: iso }, events: new URL(u).searchParams.get("dates") === ymd ? [espnFinal] : [] });
-const athlete = (name: string, stats: string[]) => ({ athlete: { id: name, displayName: name }, starter: true, stats });
+const athlete = (name: string, stats: string[], starter = true) => ({ athlete: { id: name, displayName: name }, starter, stats });
+const BOX_KEYS = ["minutes", "points", "rebounds", "assists", "turnovers", "fieldGoalsMade-fieldGoalsAttempted", "threePointFieldGoalsMade-threePointFieldGoalsAttempted", "freeThrowsMade-freeThrowsAttempted", "plusMinus"];
 const summary = {
   header: { competitions: [{ competitors, status: { period: 4, type: { state: "post", detail: "Final" } } }] },
   boxscore: { players: [
-    { team: { id: "2", abbreviation: "BOS" }, statistics: [{ keys: ["minutes", "points", "rebounds", "assists"], athletes: [athlete("Jayson Tatum", ["36", "31", "9", "6"]), athlete("Jaylen Brown", ["34", "24", "5", "4"])], totals: [] }] },
+    { team: { id: "2", abbreviation: "BOS" }, statistics: [{ keys: BOX_KEYS, athletes: [
+      athlete("Jayson Tatum", ["36", "31", "9", "6", "3", "11-22", "4-9", "5-6", "+12"]),
+      athlete("Jaylen Brown", ["34", "24", "5", "4", "2", "9-18", "2-6", "4-4", "+8"]),
+      athlete("Payton Pritchard", ["22", "14", "3", "5", "1", "5-9", "4-7", "0-0", "+6"], false),
+      { athlete: { id: "Xavier Tillman", displayName: "Xavier Tillman" }, starter: false, didNotPlay: true, reason: "COACH'S DECISION", stats: [] },
+    ], totals: [] }] },
     { team: { id: "17", abbreviation: "BKN" }, statistics: [{ keys: ["minutes", "points", "rebounds", "assists"], athletes: [athlete("Cam Thomas", ["35", "28", "3", "5"])], totals: [] }] },
   ] },
   plays: [],
@@ -69,6 +75,28 @@ describe("games", () => {
     expect(out.game).toContain("SCORE: BKN 100 – BOS 110");
     expect(out.game).toContain("FINAL");
     expect(out.top_players.home[0]).toMatchObject({ player: "Jayson Tatum", pts: 31 });
+  });
+
+  it("splits the full box into starters and bench on request", async () => {
+    const { out, ok } = await run("get_game_details", { team: "Celtics", box: true });
+    expect(ok).toBe(true);
+    expect(out.top_players).toBeUndefined();
+    const bos = out.box.home;
+    expect(bos.starters.map((l: string) => l.split(" ").slice(0, 2).join(" "))).toEqual(["Jayson Tatum", "Jaylen Brown"]);
+    expect(bos.bench).toEqual(["Payton Pritchard 22m · 14 pts 3 reb 5 ast 0 stl 0 blk 1 tov 0 pf · FG 5-9 3P 4-7 FT 0-0 · +6"]);
+    expect(bos.dnp).toEqual(["Xavier Tillman (Coach's Decision)"]);
+    expect(bos.starters_totals).toMatchObject({ players: 2, pts: 55, fg: "20-40" });
+    // 14 pts on 9 FGA, 0 FTA: TS% = 14 / 18; eFG% = (5 + 2) / 9
+    expect(bos.bench_totals).toMatchObject({ pts: 14, ts_pct: 77.8, efg_pct: 77.8, ast_to: 5, pts_share_pct: 20.3, min_share_pct: 23.9 });
+  });
+
+  it("ranks bench units with StarterBench", async () => {
+    const calls = serve([["leaguedashteamstats", resultSet([{ TEAM_ID: BOS, TEAM_NAME: "Boston Celtics", PTS: 41.2 }])]]);
+    const { out, ok } = await run("get_league_leaders", { category: "PPG", team: "Celtics", unit: "bench" });
+    expect(ok).toBe(true);
+    expect(calls[0]).toContain("StarterBench=Bench");
+    expect(out.unit).toContain("bench only");
+    expect(out.team_rank).toMatchObject({ rank: 1, value: 41.2 });
   });
 
   it("takes ESPN ids with or without the prefix", async () => {

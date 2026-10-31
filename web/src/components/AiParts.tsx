@@ -425,7 +425,8 @@ export function ModelPicker() {
           align="end"
           sideOffset={8}
           collisionPadding={8}
-          className="z-[60] flex h-[420px] w-[600px] overflow-hidden rounded-2xl border border-line bg-[#0d1017]/95 shadow-2xl backdrop-blur-xl data-[state=open]:animate-[pop_.16s_ease-out] max-sm:h-[min(460px,70vh)] max-sm:w-[calc(100vw-1rem)] max-sm:flex-col"
+          // Never taller than the room Radix finds on screen (a phone on its side has ~300px).
+          className="z-[60] flex h-[min(420px,var(--radix-popover-content-available-height))] w-[600px] overflow-hidden rounded-2xl border border-line bg-[#0d1017]/95 shadow-2xl backdrop-blur-xl data-[state=open]:animate-[pop_.16s_ease-out] max-sm:h-[min(460px,70vh,var(--radix-popover-content-available-height))] max-sm:w-[calc(100vw-1rem)] max-sm:flex-col"
         >
           {/* Phones: providers become a row of chips above the models. */}
           <div className="scroll w-[220px] shrink-0 border-r border-line p-2 max-sm:flex max-sm:w-full max-sm:gap-1 max-sm:overflow-x-auto max-sm:border-r-0 max-sm:border-b">
@@ -451,7 +452,8 @@ export function ModelPicker() {
               <Settings2 className="size-3.5" /> Manage providers & keys
             </button>
           </div>
-          <div className="flex min-w-0 flex-1 flex-col p-2">
+          {/* min-h-0: stacked on phones, the column must stop at the popover's height for the list to scroll. */}
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col p-2">
             <div className="mb-2 flex items-center gap-2 rounded-lg border border-line bg-black/30 px-2.5">
               <Search className="size-3.5 text-muted" />
               <input
@@ -461,7 +463,7 @@ export function ModelPicker() {
                 className="h-9 flex-1 bg-transparent text-[13px] outline-none placeholder:text-faint"
               />
             </div>
-            <div className="scroll min-h-0 flex-1">
+            <div className="scroll min-h-0 flex-1 overscroll-contain">
               {!data?.providers.find((p) => p.id === browsing)?.available ? (
                 <div className="p-6 text-center text-xs text-muted">
                   Not set up yet.{" "}

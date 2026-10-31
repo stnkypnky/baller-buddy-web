@@ -85,6 +85,8 @@ const CHAT_RULES =
   "Which tool to use:\n" +
   "- tonight's / a date's games, matchups, previews, predictions, who's favored → get_game_previews (one call covers every game)\n" +
   "- how a game went or is going → get_game_details with team=…\n" +
+  "- bench, starters, rotation, depth, a player's line in a game → get_game_details with box=true; " +
+  "a bench's season numbers and rank → get_league_leaders with unit=\"bench\"\n" +
   "- a day's scores → get_scoreboard; a season's results, blowouts, head-to-head → get_season_games. " +
   "Report a day's games exactly as the data lists them: never add a game, change a score, or name a player the data doesn't show in that game\n" +
   "- a player's stats, bio, recent games → get_player; best players at a stat → get_player_leaders (rookies=true for rookies)\n" +
@@ -131,6 +133,7 @@ const TOOLS_BY_TOPIC: [RegExp, string[]][] = [
   [/\b(compare|vs\.?|versus|better|or)\b/i, ["compare_players", "compare_teams"]],
   [/\b(leaders?|leads? the league|top \d+|best \w+ in the league|rank\w*)\b/i, ["get_player_leaders", "get_league_leaders"]],
   [/\b(news|trade\w*|rumou?rs?|sign\w*|waive\w*)\b/i, ["get_news"]],
+  [/\b(bench\w*|reserves?|second unit|starters?|starting (?:five|lineup)|rotation|depth|box ?score)\b/i, ["get_league_leaders"]],
   [/\b(next game|schedule|upcoming|when do|when is)\b/i, ["get_upcoming_games"]],
   [/\b(why|rule|style|rivalr\w*|accolades?|awards?|mvp)\b/i, ["get_background"]],
 ];

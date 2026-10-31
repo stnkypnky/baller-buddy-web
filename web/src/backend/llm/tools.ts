@@ -84,6 +84,12 @@ export const SPECS: ToolSpec[] = [
     parameters: { type: "object", properties: {
       team: { ...TEAM, description: "That team's game today, or its latest." },
       game_id: { type: "string", description: "From a scoreboard, preview or game log, e.g. 'espn_401810123'." },
+      box: {
+        type: "boolean",
+        description:
+          "true adds the full box score: every player who played, split into starters and bench, with each group's totals and " +
+          "shooting efficiency (eFG%, TS%), the bench's share of points and minutes, and who sat. Use it for bench, starters, rotation, depth or any player's line.",
+      },
     } },
   },
   {
@@ -107,12 +113,15 @@ export const SPECS: ToolSpec[] = [
   },
   {
     name: "get_league_leaders",
-    description: "Rank all 30 TEAMS by Net Rating, Off Rating, Def Rating, Pace, True Shooting, Eff. FG%, Reb %, Ast/TO, PPG, RPG, APG, FG%, 3P%, Steals, Blocks or Turnovers; `team` adds that team's rank.",
+    description:
+      "Rank all 30 TEAMS by Net Rating, Off Rating, Def Rating, Pace, True Shooting, Eff. FG%, Reb %, Ast/TO, PPG, RPG, APG, FG%, 3P%, Steals, Blocks or Turnovers; `team` adds that team's rank. " +
+      "`unit` ranks only the starters' or only the bench's minutes (bench scoring, bench net rating…).",
     parameters: { type: "object", properties: {
       category: { type: "string", description: "One of the categories listed above." },
       season: SEASON,
       top: { type: "integer", description: "Default 10, max 30." },
       team: TEAM,
+      unit: { type: "string", enum: ["starters", "bench"], description: "Omit for the whole team." },
     }, required: ["category"] },
   },
   {
@@ -314,6 +323,54 @@ function topLines(side: any) {
     .sort((a: any, b: any) => b.pts - a.pts)
     .slice(0, 5)
     .map((p: any) => ({ player: p.name, min: p.min, pts: p.pts, reb: p.reb, ast: p.ast, fg: `${p.fgm}-${p.fga}`, three: `${p.tpm}-${p.tpa}`, pm: p.pm }));
+}
+
+/** Box minutes as a number: ESPN gives "36", nba.com "36:12". */
+const boxMinutes = (min: string) => {
+  const [m, s] = String(min ?? "").split(":");
+  return (parseInt(m, 10) || 0) + (parseInt(s, 10) || 0) / 60;
+};
+
+/** A player's game as one line (lines survive the result-size trim better than objects). */
+function boxLine(p: any) {
+  const pm = p.pm > 0 ? `+${p.pm}` : String(p.pm);
+  return `${p.name} ${Math.round(boxMinutes(p.min))}m · ${p.pts} pts ${p.reb} reb ${p.ast} ast ${p.stl} stl ${p.blk} blk ${p.tov} tov ${p.pf} pf · ` +
+    `FG ${p.fgm}-${p.fga} 3P ${p.tpm}-${p.tpa} FT ${p.ftm}-${p.fta} · ${pm}`;
+}
+
+/** A group of players' totals and shooting efficiency. */
+function unitTotals(ps: any[]) {
+  const sum = (k: string) => ps.reduce((a, p) => a + (Number(p[k]) || 0), 0);
+  const [pts, fgm, fga, tpm, tpa, ftm, fta, ast, tov] = ["pts", "fgm", "fga", "tpm", "tpa", "ftm", "fta", "ast", "tov"].map(sum);
+  const shots = fga + 0.44 * fta;
+  return {
+    players: ps.length,
+    min: Math.round(ps.reduce((a, p) => a + boxMinutes(p.min), 0)),
+    pts, reb: sum("reb"), ast, stl: sum("stl"), blk: sum("blk"), tov,
+    fg: `${fgm}-${fga}`, three: `${tpm}-${tpa}`, ft: `${ftm}-${fta}`,
+    efg_pct: fga ? round((100 * (fgm + 0.5 * tpm)) / fga, 1) : null,
+    ts_pct: shots ? round((100 * pts) / (2 * shots), 1) : null,
+    ast_to: tov ? round(ast / tov, 2) : null,
+  };
+}
+
+/** One side of a full box, split into starters and bench. */
+function boxSplit(side: any) {
+  if (!side?.players) return null;
+  const played = side.players.filter((p: any) => !p.dnp).sort((a: any, b: any) => boxMinutes(b.min) - boxMinutes(a.min));
+  const starters = played.filter((p: any) => p.starter);
+  const bench = played.filter((p: any) => !p.starter);
+  const s = unitTotals(starters);
+  const b = unitTotals(bench);
+  const share = (x: number, y: number) => (x + y ? round((100 * x) / (x + y), 1) : null);
+  return {
+    team: side.abbr,
+    starters: starters.map(boxLine),
+    bench: bench.map(boxLine),
+    starters_totals: s,
+    bench_totals: { ...b, pts_share_pct: share(b.pts, s.pts), min_share_pct: share(b.min, s.min) },
+    dnp: side.players.filter((p: any) => p.dnp).map((p: any) => `${p.name} (${p.dnp})`),
+  };
 }
 
 /** One game of a day as a line: "FINAL: NY 101 @ CHI 99 (close) · NY: Brunson 33 pts · game_id espn_…". */
@@ -672,14 +729,24 @@ const EXECUTORS: Record<string, Exec> = {
     if (!ref) {
       throw new ToolError(raw ? `'${raw}' isn't a game id. Pass the team instead, e.g. team='Celtics'.` : "Pass a team, e.g. team='Celtics', or a game_id.");
     }
+    const full = args.box === true || args.box === "true";
     if (ref.espn) {
       const [recap, box] = await Promise.all([pulse.recapContext(ref.id), data.fetchEspnBox(ref.id).catch(() => null)]);
       const out: Record<string, unknown> = { game_id: `espn_${ref.id}`, game: recap };
-      if (box) out.top_players = { away: topLines(box.away), home: topLines(box.home) };
+      if (box && full) out.box = { away: boxSplit(box.away), home: boxSplit(box.home) };
+      else if (box) out.top_players = { away: topLines(box.away), home: topLines(box.home) };
       if (note) out.note = note;
-      return [out, "Pulled game story"];
+      return [out, full ? "Pulled full box score" : "Pulled game story"];
     }
     const d = structuredClone(await data.fetchGameBreakdown(ref.id, cache));
+    if (full) {
+      // the full box replaces the top-six lists
+      const box = await data.fetchNbaBox(ref.id).catch(() => null);
+      if (box) {
+        for (const side of ["home", "away"]) delete d[side]?.players;
+        d.box = { away: boxSplit(box.away), home: boxSplit(box.home) };
+      }
+    }
     for (const side of ["home", "away"]) if (d[side]?.players) d[side].players = d[side].players.slice(0, 6);
     if (note) d.note = note;
     return [d, `Pulled game ${ref.id} box score`];
@@ -715,17 +782,20 @@ const EXECUTORS: Record<string, Exec> = {
       data.LEADER_CATEGORIES.find((c) => c[0].toLowerCase().includes(want));
     if (!cat) throw new ToolError(`Unknown category '${args.category}'`);
     const [label, measure, field, hib, , definition] = cat;
-    const rows = (await data.fetchLeagueTeamStats(season(args), measure, cache))
+    const wantUnit = String(args.unit ?? "").trim().toLowerCase();
+    const unit = wantUnit === "bench" ? "Bench" : wantUnit.startsWith("starter") ? "Starters" : undefined;
+    const rows = (await data.fetchLeagueTeamStats(season(args), measure, cache, unit))
       .filter((r) => field in r)
       .sort((x, y) => (hib ? y[field] - x[field] : x[field] - y[field]));
     const top = clampInt(args.top, 10, 1, 30);
     const out: Record<string, unknown> = { category: label, definition, ranking: rows.slice(0, top).map((r, i) => ({ rank: i + 1, team: r.team_name, value: r[field] })) };
+    if (unit) out.unit = `${unit.toLowerCase()} only: stats from just the ${unit === "Bench" ? "reserves'" : "starters'"} minutes`;
     if (args.team) {
       const t = findTeam(args.team);
       const i = t ? rows.findIndex((r) => r.team_id === t.id) : -1;
       out.team_rank = i >= 0 ? { rank: i + 1, of: rows.length, team: rows[i].team_name, value: rows[i][field] } : `No ${label} ranking for '${args.team}'.`;
     }
-    return [out, `Ranked teams by ${label}`];
+    return [out, `Ranked ${unit ? `${unit.toLowerCase()} units` : "teams"} by ${label}`];
   },
 
   async get_player_leaders(args, cache) {

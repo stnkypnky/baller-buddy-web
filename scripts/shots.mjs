@@ -46,6 +46,33 @@ const OPEN = {
   "/ai": [
     ["typed", async (p) => p.locator("textarea").fill("Who has been better over the last ten games, the Celtics or the Knicks, and what changed in their rotations?")],
     ["models", async (p) => p.locator("main button:has-text('·')").first().click()],
+    // the model list scrolls (a swipe on touch screens, the wheel otherwise) and fits on screen
+    ["models-scrolled", async (p) => {
+      const list = p.locator("[data-radix-popper-content-wrapper] .overscroll-contain").first();
+      const box = await list.boundingBox();
+      if (!box) throw new Error("model list isn't showing");
+      const top = () => list.evaluate((e) => e.scrollTop);
+      const touch = !!(await p.evaluate(() => navigator.maxTouchPoints));
+      const [x, y] = [box.x + box.width / 2, box.y + box.height * 0.75];
+      if (touch) {
+        // a finger dragging up (Input.synthesizeScrollGesture's touch mode doesn't scroll here)
+        const cdp = await p.context().newCDPSession(p);
+        await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
+        for (let i = 1; i <= 10; i++) {
+          await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x, y: y - i * Math.min(15, box.height / 20) }] });
+          await p.waitForTimeout(16);
+        }
+        await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+      } else {
+        await p.mouse.move(x, y);
+        await p.mouse.wheel(0, 300);
+      }
+      await p.waitForTimeout(400);
+      const [scrolled, room] = [await top(), await list.evaluate((e) => `${e.scrollHeight}/${e.clientHeight}`)];
+      if (!scrolled) throw new Error(`model list didn't scroll (content/visible ${room})`);
+      const vh = p.viewportSize().height;
+      if (box.y + box.height > vh + 1) throw new Error(`model list runs off screen (${Math.round(box.y + box.height)} > ${vh})`);
+    }],
   ],
 };
 
@@ -143,8 +170,12 @@ for (const [label, viewport] of Object.entries(SIZES)) {
   // The page scrolls inside the app shell, so "full page" means a tall window.
   if (process.env.FULL) viewport.height = 2400;
   const ctx = await browser.newContext({ viewport, deviceScaleFactor: phone ? 2 : 1, isMobile: phone, hasTouch: phone });
+  // LM Studio with a long model list, so the model picker has to scroll
+  const models = { data: Array.from({ length: 40 }, (_, i) => ({ id: `sample-model-${String(i + 1).padStart(2, "0")}-instruct` })) };
+  await ctx.route("http://localhost:1234/v1/models", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(models) }));
   await ctx.route("**/api/proxy?*", async (route) => {
     const target = new URL(route.request().url()).searchParams.get("url");
+    if (target?.startsWith("http://localhost:1234/v1/models")) return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(models) });
     const hit = target && sampleFor(target);
     if (hit) return route.fulfill({ status: 200, contentType: hit[0], body: hit[1] });
     return route.fulfill({ status: 404, body: "" });

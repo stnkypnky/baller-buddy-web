@@ -144,12 +144,13 @@ export async function fetchStandings(teamId: number, season: string, cache: Cach
 }
 export type Standings = Awaited<ReturnType<typeof fetchStandings>>;
 
-/** All 30 teams' stats for a season in one call ("Base" or "Advanced"). */
-export function fetchLeagueTeamStats(season: string, measure: string, cache: Cache): Promise<Row[]> {
+/** All 30 teams' stats for a season in one call ("Base" or "Advanced"),
+ *  optionally from just the starters' or the bench's minutes. */
+export function fetchLeagueTeamStats(season: string, measure: string, cache: Cache, unit?: "Starters" | "Bench"): Promise<Row[]> {
   return cache.getOrFetch(
-    `leaders_${season}_${measure}`,
+    `leaders_${season}_${measure}${unit ? `_${unit}` : ""}`,
     async () => {
-      const j = await statsGet("leaguedashteamstats", dashParams(season, measure, { TeamID: "" }));
+      const j = await statsGet("leaguedashteamstats", dashParams(season, measure, { TeamID: "", StarterBench: unit ?? "" }));
       return resultSet(j).map((r) => {
         const tid = int(r.TEAM_ID);
         const row: Row = { team_id: tid, team_name: getTeamName(tid) };
